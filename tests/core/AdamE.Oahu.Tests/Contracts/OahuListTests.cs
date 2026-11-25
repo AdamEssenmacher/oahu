@@ -221,6 +221,83 @@ public sealed class OahuListTests
     }
 
     [Fact]
+    public void A_collection_that_reports_a_huge_count_gives_its_items_without_allocating_that_count()
+    {
+        AssertEqual([1, 2, 3], new KeepingCollection([1, 2, 3], count: int.MaxValue).ToOahuList());
+        AssertEqual([1, 2, 3], new KeepingCollection([1, 2, 3], count: Array.MaxLength).ToOahuList());
+    }
+
+    [Fact]
+    public void A_collection_that_reports_far_fewer_items_than_it_gives_still_gives_them_all()
+    {
+        var items = Enumerable.Range(0, 10_000).ToArray();
+
+        AssertEqual(OahuList.Create(items), new KeepingCollection(items, count: 1).ToOahuList());
+        AssertEqual(OahuList.Create(items), new KeepingCollection(items, count: 3).ToOahuList());
+    }
+
+    [Fact]
+    public void A_collection_that_reports_more_items_than_it_gives_gives_only_its_items()
+    {
+        var aboveTheCap = OahuList.MostTrustedCount + 1;
+        var items = Enumerable.Range(0, OahuList.MostTrustedCount + 10).ToArray();
+
+        AssertEqual([1, 2, 3], new KeepingCollection([1, 2, 3], count: OahuList.MostTrustedCount).ToOahuList());
+        AssertEqual([1, 2, 3], new KeepingCollection([1, 2, 3], count: aboveTheCap).ToOahuList());
+        AssertEqual([1, 2, 3], new KeepingCollection([1, 2, 3], count: 10 * OahuList.MostTrustedCount).ToOahuList());
+        AssertEqual(OahuList.Create(items), new KeepingCollection(items, count: 100_000).ToOahuList());
+    }
+
+    [Fact]
+    public void A_large_collection_that_tells_its_count_is_copied_whole_and_kept_from_the_source()
+    {
+        var items = Enumerable.Range(0, 100_000).ToArray();
+        var source = new KeepingCollection(items);
+
+        var list = source.ToOahuList();
+        source.ChangeKeptArrays(-1);
+
+        Assert.Equal(100_000, list.Count);
+        Assert.True(list.AsSpan().SequenceEqual(items));
+    }
+
+    [Fact]
+    public void A_type_derived_from_List_gives_the_items_it_enumerates()
+    {
+        var evens = new EvenList { 1, 2, 3, 4, 5, 6 };
+
+        AssertEqual([2, 4, 6], evens.ToOahuList());
+        AssertEqual([2, 4, 6], OahuList.CreateRange(evens));
+        AssertEqual([2, 4, 6], ((IEnumerable<int>)evens).ToOahuList());
+    }
+
+    [Fact]
+    public void A_List_is_copied_into_a_single_array()
+    {
+        List<int> source = [1, 2, 3, 4];
+
+        var arrayOnly = Allocations.Smallest(() => _sink = new int[4]);
+        var copied = Allocations.Smallest(() => _ints = source.ToOahuList());
+
+        Assert.True(arrayOnly > 0);
+        Assert.Equal(arrayOnly, copied);
+        AssertEqual([1, 2, 3, 4], _ints);
+    }
+
+    [Fact]
+    public void An_array_of_a_derived_type_passed_as_an_enumerable_of_its_base_type_is_copied()
+    {
+        string[] source = ["a", "b"];
+        var asObjects = (IEnumerable<object>)source;
+
+        var list = asObjects.ToOahuList();
+        source[0] = "z";
+
+        AssertEqual<object>(["a", "b"], list);
+        AssertEqual<object>(["z", "b"], OahuList.CreateRange(asObjects));
+    }
+
+    [Fact]
     public void Its_interfaces_have_no_member_that_changes_it()
     {
         var interfaces = typeof(OahuList<int>).GetInterfaces().Select(type => type.IsGenericType ? type.GetGenericTypeDefinition() : type);
@@ -739,6 +816,19 @@ public sealed class OahuListTests
         public void Clear() => throw new NotSupportedException();
 
         public bool Remove(int item) => throw new NotSupportedException();
+    }
+
+    // A list whose enumeration through IEnumerable<int> gives only its even items, unlike the items it stores.
+    private sealed class EvenList : List<int>, IEnumerable<int>
+    {
+        IEnumerator<int> IEnumerable<int>.GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++)
+            {
+                if (this[i] % 2 == 0)
+                    yield return this[i];
+            }
+        }
     }
 
     private static byte[] Bytes(double value)

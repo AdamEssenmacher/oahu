@@ -246,7 +246,7 @@ public static class OahuList
     /// expression calls it. Changing the array or span afterwards does not change the list. No items give the empty
     /// list, with no allocation. A collection expression of items copies them once. One with a spread, such as
     /// <c>[.. source, 5]</c>, copies them twice: the compiler gathers them into a span, and this method copies the
-    /// span. For a large source, <see cref="ToOahuList{T}(IEnumerable{T})"/> copies once.
+    /// span. For a large array or <see cref="List{T}"/>, <see cref="ToOahuList{T}(IEnumerable{T})"/> copies once.
     /// </remarks>
     /// <typeparam name="T">The type of the items.</typeparam>
     /// <param name="items">The items, in order.</param>
@@ -262,13 +262,16 @@ public static class OahuList
     /// changes.
     /// </para>
     /// <para>
-    /// An array or a <see cref="List{T}"/> is copied once, as a span. Any other source is enumerated, once, into an
-    /// array that the list then keeps. That array is never passed to the source's own code, so a source cannot keep
-    /// it and change the list afterwards: <see cref="ICollection{T}.CopyTo"/> is not called, and neither is
-    /// <see cref="Enumerable.ToArray{TSource}(IEnumerable{TSource})"/>, which calls it. When the source tells its count
-    /// without being enumerated, as every <see cref="ICollection{T}"/> does, the array is that size; otherwise it
-    /// grows as a <see cref="List{T}"/> does, and is cut to the number of items at the end. A count that turns out to
-    /// be wrong changes only the cost: the list has the items the enumeration gave.
+    /// An array or a <see cref="List{T}"/> is copied once, as a span. A type derived from <see cref="List{T}"/> is
+    /// not: it can enumerate other items than the ones it stores, so it is enumerated like any other source. Any other
+    /// source is enumerated, once, into an array that the list then keeps. That array is never passed to the source's
+    /// own code, so a source cannot keep it and change the list afterwards: <see cref="ICollection{T}.CopyTo"/> is not
+    /// called, and neither is <see cref="Enumerable.ToArray{TSource}(IEnumerable{TSource})"/>, which calls it. When the
+    /// source tells its count without being enumerated, as every <see cref="ICollection{T}"/> does, a count of up to
+    /// 4,096 items sizes the array exactly. A larger count is not trusted for the first array, which holds 4,096
+    /// items and then doubles as items arrive, up to the count; with no count, the array grows as a
+    /// <see cref="List{T}"/> does. The array is cut to the number of items at the end. A count that turns out to be
+    /// wrong changes only the cost: the list has the items the enumeration gave.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The type of the items.</typeparam>
@@ -279,27 +282,45 @@ public static class OahuList
     {
         ArgumentNullException.ThrowIfNull(items);
 
-        // Only types whose items can be read without running the source's own code are copied as a span. A
-        // List<T>'s members are not virtual, so a type derived from it cannot change what CollectionsMarshal reads.
-        // ReadOnlySpan, unlike Span, accepts an array whose element type is derived from T.
+        // Only types whose items can be read without running the source's own code are copied as a span. A type
+        // derived from List<T> can reimplement IEnumerable<T>.GetEnumerator to give other items than the ones it
+        // stores, so only List<T> itself is read through CollectionsMarshal. An array type cannot be derived from; an
+        // array whose element type is derived from T (array covariance) enumerates the same items its span holds, and
+        // ReadOnlySpan, unlike Span, accepts it.
         return items switch
         {
             OahuList<T> list => list,
             T[] array => Create(new ReadOnlySpan<T>(array)),
-            List<T> list => Create<T>(CollectionsMarshal.AsSpan(list)),
+            List<T> list when list.GetType() == typeof(List<T>) => Create<T>(CollectionsMarshal.AsSpan(list)),
             _ => Enumerate(items),
         };
     }
 
+    // The most items a reported count can make the first array hold before any item is read. A source can report any
+    // count, so trusting a large one would let it allocate that much (int.MaxValue items throws OutOfMemoryException)
+    // for a few items. 4,096 items cost at most 32 KB for references or 8-byte values, under the large object heap's
+    // threshold of 85,000 bytes, and a count up to this size, the common case, still takes a single array.
+    internal const int MostTrustedCount = 4096;
+
     // Enumerates items into an array that no code of theirs ever sees, so the list can own it.
     private static OahuList<T> Enumerate<T>(IEnumerable<T> items)
     {
-        var buffer = items.TryGetNonEnumeratedCount(out var count) && count > 0 ? new T[count] : [];
+        // Past the first array, each array at most doubles the items already read, so a count that is too large
+        // costs at most a first array of MostTrustedCount items and then twice the items the source gives. The
+        // reported count only stops the doubling at that size, so an honest large count needs no cut at the end.
+        var hasCount = items.TryGetNonEnumeratedCount(out var count) && count > 0;
+        var buffer = hasCount ? new T[Math.Min(count, MostTrustedCount)] : [];
         var length = 0;
         foreach (var item in items)
         {
             if (length == buffer.Length)
-                Array.Resize(ref buffer, (int)Math.Max(length + 1L, Math.Min(Math.Max(4L, 2L * buffer.Length), Array.MaxLength)));
+            {
+                var size = Math.Min(Math.Max(4L, 2L * buffer.Length), Array.MaxLength);
+                if (hasCount && count > length)
+                    size = Math.Min(size, count);
+
+                Array.Resize(ref buffer, (int)Math.Max(length + 1L, size));
+            }
 
             buffer[length++] = item;
         }
