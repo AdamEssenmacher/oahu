@@ -10,7 +10,9 @@ namespace AdamE.Oahu.Wire;
 /// Writes values in Oahu's wire format to a growable byte buffer that the writer owns.
 /// </summary>
 /// <remarks>
-/// A writer holds bytes and nothing else. It is not thread-safe. Call <see cref="Reset"/> to reuse it for another message.
+/// A writer holds bytes and the nesting depth of the value being written, and nothing else. It is not thread-safe. The
+/// codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's parts.
+/// Call <see cref="Reset"/> to reuse the writer for another message.
 /// </remarks>
 public sealed class OahuWriter
 {
@@ -28,6 +30,9 @@ public sealed class OahuWriter
 
     // Counts calls to Reset, so that WriteList can tell that an item writer reset the writer.
     private int _resets;
+
+    // The number of record and union values entered and not yet exited.
+    private int _depth;
 
     /// <summary>Creates a writer with a default initial capacity.</summary>
     public OahuWriter()
@@ -53,13 +58,68 @@ public sealed class OahuWriter
 
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
-    /// The buffer is kept and never shrinks, so it keeps the size that the largest message written so far needed. Do
-    /// not call it from an item writer of <see cref="WriteList{T}"/>: the list then throws.
+    /// The nesting depth returns to zero. The buffer is kept and never shrinks, so it keeps the size that the largest
+    /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/>: the list then
+    /// throws.
     /// </remarks>
     public void Reset()
     {
         _count = 0;
+        _depth = 0;
         _resets++;
+    }
+
+    /// <summary>
+    /// Enters a record or union value: raises the nesting depth by one, and refuses the value if that takes the depth
+    /// past <see cref="OahuFormat.MaxNestingDepth"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The codec of a record or a union, generated or written by hand, calls it once for each value it writes: before
+    /// writing anything of the value, so before a record's first field or a union's case index. It calls
+    /// <see cref="ExitNested"/> after the value's last field. A record with no fields calls both too. No other codec
+    /// calls them: lists, nullable values, enums and other values do not add depth.
+    /// </para>
+    /// <para>
+    /// Every record value counts, including a value of a record type that never contains itself. A union value and the
+    /// case it holds are one level: a union's codec calls this method once, writes the case index and that case's
+    /// fields, then calls <see cref="ExitNested"/>, and does not call them again for the case. A record type that is
+    /// also a union case calls them as a record when it is a field's value, and not when it is the case of a union
+    /// value.
+    /// </para>
+    /// <para>
+    /// When the value is refused, nothing of it has been written and the depth is unchanged. The exception propagates
+    /// through the codecs of the values that enclose it, which do not call <see cref="ExitNested"/>, so the writer's
+    /// contents and depth are then unspecified: call <see cref="Reset"/> before writing another message. The call
+    /// allocates nothing.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The value would be nested deeper than <see cref="OahuFormat.MaxNestingDepth"/>.
+    /// </exception>
+    public void EnterNested()
+    {
+        if (_depth >= OahuFormat.MaxNestingDepth)
+        {
+            throw new InvalidOperationException(
+                $"The value at byte offset {_count} is at nesting depth {_depth + 1}, deeper than the largest " +
+                $"nesting depth, {OahuFormat.MaxNestingDepth}.");
+        }
+
+        _depth++;
+    }
+
+    /// <summary>
+    /// Exits the record or union value entered last with <see cref="EnterNested"/>: lowers the nesting depth by one.
+    /// </summary>
+    /// <remarks>Call it after the value's last field. The call allocates nothing.</remarks>
+    /// <exception cref="InvalidOperationException">No value is entered: the depth is already zero.</exception>
+    public void ExitNested()
+    {
+        if (_depth == 0)
+            throw new InvalidOperationException("ExitNested was called with no nested value entered.");
+
+        _depth--;
     }
 
     /// <summary>
@@ -215,13 +275,19 @@ public sealed class OahuWriter
     /// </para>
     /// <para>
     /// <paramref name="writeItem"/> must not call <see cref="Reset"/>, because that would remove the list's count and
-    /// everything written before it. After the items, the method throws if the writer was reset while they were
-    /// written.
+    /// everything written before it. After each item, the method throws if that item reset the writer.
+    /// </para>
+    /// <para>
+    /// A list does not add nesting depth and does not call <see cref="EnterNested"/>: the codec of a record or union
+    /// item does that itself. After each item, the method throws if that item left the depth different from what it
+    /// was before it, because the item called <see cref="EnterNested"/> and <see cref="ExitNested"/> a different
+    /// number of times. So an item that enters without exiting is reported as that fault, not as a value nested too
+    /// deep.
     /// </para>
     /// <para>
     /// A <see langword="null"/> argument throws before anything is written. If <paramref name="writeItem"/> throws, the
-    /// writer was reset, or the items wrote fewer bytes than there are items, the exception propagates and the writer's
-    /// contents are unspecified: call <see cref="Reset"/> before writing another message.
+    /// writer was reset, an item changed the depth, or the items wrote fewer bytes than there are items, the exception
+    /// propagates and the writer's contents are unspecified: call <see cref="Reset"/> before writing another message.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The type of the items.</typeparam>
@@ -232,7 +298,8 @@ public sealed class OahuWriter
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The message would be longer than <see cref="Array.MaxLength"/> bytes, <paramref name="writeItem"/> reset the
-    /// writer, or the items wrote fewer bytes than there are items.
+    /// writer, an item left the nesting depth different from what it was before it, or the items wrote fewer bytes than
+    /// there are items.
     /// </exception>
     public void WriteList<T>(IReadOnlyList<T> items, Action<OahuWriter, T> writeItem)
     {
@@ -244,12 +311,25 @@ public sealed class OahuWriter
         WriteCount(count);
         var itemsStart = _count;
         var resets = _resets;
+        var depth = _depth;
         for (var i = 0; i < count; i++)
+        {
             writeItem(this, items[i]);
 
-        // A reset followed by enough writes can leave _count above itemsStart, so the byte check alone misses it.
-        if (_resets != resets)
-            throw new InvalidOperationException("An item writer reset the writer while its list was being written.");
+            // Both checks run after each item, so that an item that enters without exiting is reported here rather
+            // than reaching the depth limit within the list and being reported as a too-deep value. A reset followed
+            // by enough writes can leave _count above itemsStart, so the byte check alone misses it. A reset also
+            // zeroes the depth, so it is checked first.
+            if (_resets != resets)
+                throw new InvalidOperationException("An item writer reset the writer while its list was being written.");
+
+            if (_depth != depth)
+            {
+                throw new InvalidOperationException(
+                    $"An item of the list left the nesting depth at {_depth}, not {depth} as before it. Every item " +
+                    "must call ExitNested once for each EnterNested.");
+            }
+        }
 
         // One check per list. It guarantees that a reader's count check passes, but it does not prove that each item
         // wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make up for it.

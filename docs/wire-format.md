@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values and lists.
+This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists and the nesting depth of records and unions.
 
 ## Messages
 
@@ -196,7 +196,7 @@ A list is the number of its items as a count, then each item in order. Each item
 | One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 | 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
 
-Every item of a list takes at least one byte. The contract rules forbid an item type whose values can be written as no bytes at all. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates: that total is bounded by the nesting depth times the size of the input. For a type of fixed depth, the type sets the depth. For a type that contains itself, such as a record with a list of itself, the input sets the depth, and deep nesting can exhaust a reader's stack. The format does not yet limit nesting depth.
+Every item of a list takes at least one byte. The contract rules forbid an item type whose values can be written as no bytes at all. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
 
 Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
 
@@ -206,6 +206,53 @@ Lists nest. An item can be any value: a list, a nullable value, a string and so 
 | A list of nullable strings: absent, `x`, the empty string, absent | `04 00 01 01 78 01 00 00` |
 
 In C#, `OahuWriter.WriteList` and `OahuReader.ReadList` take a delegate that writes or reads one item. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `ReadList` returns an array of exactly the count's length and allocates nothing else, apart from what the delegate allocates for the items; an empty list is the same shared instance every time. `WriteList` reads the list's `Count` once. After the items, it throws `InvalidOperationException` if they wrote fewer bytes than there are items; it does not check each item on its own. It also throws `InvalidOperationException` if the delegate reset the writer. If the delegate throws, or `WriteList` does, the exception propagates. The writer's contents are then unspecified, so reset it before writing another message.
+
+## Nesting depth
+
+A record is its fields in order. A union is the index of its case, then that case's fields. A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, IReadOnlyList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
+
+A value's nesting depth is the number of record and union values that enclose it, counting itself if it is one. Records and unions count because they are the only kinds of value that can contain a value of their own type. Every record and union value counts, including a value of a record type that never contains itself. Lists, nullable values, enums, strings and primitive values do not add depth.
+
+A union value and the case it holds are one level, not two. In a contract a union's cases are records; the union value counts once, the record of its case is not counted again, and the case's fields are at the union's depth. A record type that is used both as a union case and on its own counts as a record when it is a field's value, and not again when it is the case of a union value.
+
+The largest nesting depth is 64. A value at depth 65 is not valid in the format. A writer refuses to write it, and a reader rejects it as malformed. Every implementation accepts depth 64 and rejects depth 65.
+
+For these types, written in a contract's notation:
+
+```text
+record Point(double X, double Y);
+record Node(string Name, Point Origin, IReadOnlyList<Node> Children);
+record Folder(IReadOnlyList<Node>? Nodes);
+union Shape = Circle(Point Center, double Radius) | Group(IReadOnlyList<Shape> Shapes);
+record Badge(Circle Mark);
+```
+
+| Value | Depth |
+| --- | --- |
+| A message whose value is a primitive, such as an `int`, or a list of primitives | 0 |
+| A `Node` that is the message's value | 1 |
+| A field that is a primitive, string, enum, list or nullable value, such as that `Node`'s `Name` or `Children` | The depth of the record that holds it: 1 |
+| That `Node`'s `Origin`, a `Point` | 2 |
+| A `Node` in its `Children` | 2 |
+| A `Node` in the `Children` of that one | 3 |
+| The `Origin` of a `Node` at depth 64 | 65, which is not valid, although `Point` never contains itself |
+| Each `Node` of a message whose value is a list of `Node`s | 1 |
+| A `Node` in the `Nodes` of a `Folder`: a record inside a list inside a nullable value inside a record | The `Folder`'s depth plus 1 |
+| A `Shape` that is the message's value | 1 |
+| The case a `Shape` holds, and that case's fields, such as a `Group`'s `Shapes` list | The `Shape`'s depth |
+| A `Shape` in the `Shapes` of a `Group`: a `Group` inside a `Group` | 2 |
+| A `Circle`'s `Center`: a record that is a field of a union's case | The `Shape`'s depth plus 1 |
+| The `Mark` of a `Badge`, a `Circle` that is a field's value, not a case | The `Badge`'s depth plus 1 |
+
+The limit exists for two reasons. Without it, a reader of a deeply nested value runs out of stack. On most platforms that ends the app with no error to catch, and the depth at which it happens differs with each platform's stack size. With the limit, every platform fails on the same values, with a message. The limit also bounds what a reader allocates, as [Lists](#lists) describes.
+
+In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a union calls `EnterNested` on the writer or the reader before anything of the value, so before a record's first field or a union's case index, and `ExitNested` after its last field. A record with no fields calls them too, and so does a record type that never contains itself. A union's codec calls `EnterNested` once, writes or reads the case index and that case's fields, then calls `ExitNested`; it does not call them again for the case, including a case with no fields. Nothing else counts depth: `WriteList`, `ReadList` and the presence methods do not.
+
+- `OahuWriter.EnterNested` throws `InvalidOperationException` for a value at depth 65, before anything of the value is written. Reset the writer before writing another message.
+- `OahuReader.EnterNested` throws `OahuFormatException` for a value at depth 65. Its offset is where that value starts, and the reader stays where it was.
+- `ExitNested` throws `InvalidOperationException` on both when no value is entered. `OahuReader.EnsureEnd` throws it when a value is still entered. `WriteList` and `ReadList` throw it when an item leaves the depth different from what it was before that item. Each is a fault in a codec, not in the input.
+- These checks cover list items and the end of a message, and nothing else. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
+- `OahuWriter.Reset` returns the writer's depth to zero.
 
 ## Malformed input
 
@@ -227,6 +274,7 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - A list's count is malformed in any of the ways a count is, above.
 - A list's count is larger than the number of bytes left after it.
 - An item of a list, or a present value, is malformed in any of the ways a value of its type is.
+- A record or union value is at nesting depth 65.
 - Bytes are left over after the message's value.
 
 In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length, and for a list, its count. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. The exception is `ReadList` when an item is malformed: the items before it have been read. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.

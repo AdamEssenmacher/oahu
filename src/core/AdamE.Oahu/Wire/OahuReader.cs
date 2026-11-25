@@ -10,11 +10,12 @@ namespace AdamE.Oahu.Wire;
 /// Reads values in Oahu's wire format from a span of bytes, in order from the start.
 /// </summary>
 /// <remarks>
-/// A reader holds the input and its position in it, and nothing else. A single read call either returns a value and
-/// moves past its bytes, or throws <see cref="OahuFormatException"/> and leaves the position where it was. A value
-/// made of several parts is read with several calls, so a failure can come after earlier parts have been read. A
-/// reader that has thrown is not used again: the message is rejected as a whole. After reading a message's value, call
-/// <see cref="EnsureEnd"/> to reject bytes left over.
+/// A reader holds the input, its position in it and the nesting depth of the value being read, and nothing else. A
+/// single read call either returns a value and moves past its bytes, or throws <see cref="OahuFormatException"/> and
+/// leaves the position where it was. A value made of several parts is read with several calls, so a failure can come
+/// after earlier parts have been read. A reader that has thrown is not used again: the message is rejected as a whole.
+/// The codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's
+/// parts. After reading a message's value, call <see cref="EnsureEnd"/> to reject bytes left over.
 /// </remarks>
 public ref struct OahuReader
 {
@@ -27,12 +28,16 @@ public ref struct OahuReader
     private readonly ReadOnlySpan<byte> _input;
     private int _offset;
 
+    // The number of record and union values entered and not yet exited.
+    private int _depth;
+
     /// <summary>Creates a reader positioned at the start of <paramref name="input"/>.</summary>
     /// <param name="input">The bytes to read.</param>
     public OahuReader(ReadOnlySpan<byte> input)
     {
         _input = input;
         _offset = 0;
+        _depth = 0;
     }
 
     /// <summary>The number of bytes not read yet.</summary>
@@ -308,9 +313,16 @@ public ref struct OahuReader
     /// <remarks>
     /// <para>
     /// Every item takes at least one byte, so a count larger than the bytes that remain after it is rejected before
-    /// anything is allocated. This bounds this list's array by the bytes that remain, not the total allocated: for an
-    /// item type that contains itself, that total is bounded by the nesting depth times the size of the input, and deep
-    /// nesting can exhaust the stack. The format does not yet limit nesting depth.
+    /// anything is allocated. This bounds this list's array by the bytes that remain. A list does not add nesting depth
+    /// and does not call <see cref="EnterNested"/>: the codec of a record or union item does that itself.
+    /// </para>
+    /// <para>
+    /// After each item, the method throws <see cref="InvalidOperationException"/> if the item left the depth different
+    /// from what it was before that item, because it called <see cref="EnterNested"/> and <see cref="ExitNested"/> a
+    /// different number of times. That is a fault in the item's codec, not in the input. The check is made after each
+    /// item, so an item codec that enters without exiting is reported as such and not as a value nested too deep. An item
+    /// that is nested too deep throws <see cref="OahuFormatException"/> from inside <paramref name="readItem"/>,
+    /// before the check.
     /// </para>
     /// <para>
     /// The items are returned in an array of exactly the count's length. Apart from what <paramref name="readItem"/>
@@ -332,6 +344,9 @@ public ref struct OahuReader
     /// The count is malformed, as for <see cref="ReadCount"/>, or it is larger than the bytes that remain after it.
     /// <paramref name="readItem"/> may throw it too, for a malformed item.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// An item left the nesting depth different from what it was before it.
+    /// </exception>
     public IReadOnlyList<T> ReadList<T>(OahuReadFunc<T> readItem)
     {
         ArgumentNullException.ThrowIfNull(readItem);
@@ -351,17 +366,92 @@ public ref struct OahuReader
                 start);
         }
 
+        // Checked after each item, not once after all of them: an item that enters without exiting would otherwise
+        // reach the depth limit within the list and be reported as too-deep input. A too-deep item throws
+        // OahuFormatException from inside readItem, so it never reaches this check.
+        var depth = _depth;
         var items = new T[count];
         for (var i = 0; i < items.Length; i++)
+        {
             items[i] = readItem(ref this);
+            if (_depth != depth)
+            {
+                throw new InvalidOperationException(
+                    $"An item of the list at byte offset {start} left the nesting depth at {_depth}, not {depth} as " +
+                    "before it. Every item must call ExitNested once for each EnterNested.");
+            }
+        }
 
         return items;
     }
 
-    /// <summary>Checks that the whole input has been read.</summary>
+    /// <summary>
+    /// Enters a record or union value: raises the nesting depth by one, and rejects the value if that takes the depth
+    /// past <see cref="OahuFormat.MaxNestingDepth"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The codec of a record or a union, generated or written by hand, calls it once for each value it reads: before
+    /// reading anything of the value, so before a record's first field or a union's case index. It calls
+    /// <see cref="ExitNested"/> after the value's last field. A record with no fields calls both too. No other codec
+    /// calls them: lists, nullable values, enums and other values do not add depth.
+    /// </para>
+    /// <para>
+    /// Every record value counts, including a value of a record type that never contains itself. A union value and the
+    /// case it holds are one level: a union's codec calls this method once, reads the case index and that case's
+    /// fields, then calls <see cref="ExitNested"/>, and does not call them again for the case. A record type that is
+    /// also a union case calls them as a record when it is a field's value, and not when it is the case of a union
+    /// value.
+    /// </para>
+    /// <para>
+    /// When the value is rejected, the reader stays where it was, at the start of the value, with its depth unchanged.
+    /// If a part of the value is malformed, the codec does not call <see cref="ExitNested"/>: the reader is not used
+    /// again. The call allocates nothing.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OahuFormatException">
+    /// The value would be nested deeper than <see cref="OahuFormat.MaxNestingDepth"/>.
+    /// </exception>
+    public void EnterNested()
+    {
+        if (_depth >= OahuFormat.MaxNestingDepth)
+        {
+            throw new OahuFormatException(
+                $"The value at byte offset {_offset} is at nesting depth {_depth + 1}, deeper than the largest " +
+                $"nesting depth, {OahuFormat.MaxNestingDepth}.",
+                _offset);
+        }
+
+        _depth++;
+    }
+
+    /// <summary>
+    /// Exits the record or union value entered last with <see cref="EnterNested"/>: lowers the nesting depth by one.
+    /// </summary>
+    /// <remarks>Call it after the value's last field. The call allocates nothing.</remarks>
+    /// <exception cref="InvalidOperationException">No value is entered: the depth is already zero.</exception>
+    public void ExitNested()
+    {
+        if (_depth == 0)
+            throw new InvalidOperationException("ExitNested was called with no nested value entered.");
+
+        _depth--;
+    }
+
+    /// <summary>Checks that the whole input has been read and that every value entered has been exited.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>. That is a
+    /// fault in a codec, not in the input.
+    /// </exception>
     /// <exception cref="OahuFormatException">Bytes remain after the last value read.</exception>
     public readonly void EnsureEnd()
     {
+        if (_depth != 0)
+        {
+            throw new InvalidOperationException(
+                $"{_depth} nested value(s) entered with EnterNested have not been exited with ExitNested.");
+        }
+
         if (_offset != _input.Length)
         {
             throw new OahuFormatException(
