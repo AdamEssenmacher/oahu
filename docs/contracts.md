@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is complete, apart from methods. What exists, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, the no-value type `OahuUnit`, and the list type `OahuList<T>`, through which contract values compare by content, as [Equality](#equality) says. The wire format gives the bytes of a keyed list's batch, in [Keyed-list batches](wire-format.md#keyed-list-batches). A contract's methods are outlined in the [architecture](architecture.md#the-central-idea), but this page does not give their rules yet: what a method may return and take arrives in the next pull request of this milestone. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is complete. What exists, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, the no-value type `OahuUnit`, and the list type `OahuList<T>`, through which contract values compare by content, as [Equality](#equality) says. The wire format gives the bytes of a keyed list's batch, in [Keyed-list batches](wire-format.md#keyed-list-batches). A contract's methods need no type of their own: they are ordinary methods of the interface, and [Methods](#methods) gives their rules. Nothing implements the stream interfaces yet, nothing calls a method, nothing checks a contract and nothing is generated from one: the sources, the exporter, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -13,6 +13,17 @@ A contract has **streams**, which carry values from the view model to the screen
 ```csharp
 IOahuState<string> FileName { get; }
 ```
+
+A member is a [method](#methods) of the contract, or the edit of an [editable value](#editable-values). A contract declares nothing else, as [What is not allowed](#what-is-not-allowed) says.
+
+### The contract interface
+
+- **Not generic.** A contract has no type parameters. Declare one contract for each concrete type.
+- **Accessible.** The interface is `public` or `internal`, and so is every type it is nested in, so that the code Oahu generates in the contract's assembly can use it.
+- **No nested types.** A contract declares no type inside it, not even a record it uses. Declare its records, unions and enums beside it.
+- **One declaration.** A contract is not `partial` and extends no interface, as [What is not allowed](#what-is-not-allowed) says.
+
+How a contract is named on the native side, and what happens when two contracts would get the same name, is defined with the contract model, in a later milestone of the [roadmap](roadmap.md).
 
 The vocabulary is in the `AdamE.Oahu` namespace, the one an app author imports. The `AdamE.Oahu.Wire` namespace is for generated code.
 
@@ -217,6 +228,123 @@ The screen sees the contract through a generated native model. The model has the
 
 The messages are different. The screen receives each one as it is published and shows it, for example as a banner that goes away. A message published before the screen subscribed never reaches it, and the same message published twice is shown twice.
 
+The screen can also ask the view model to do something, such as retry the download. It does that through a method, as [Methods](#methods) says, and its [example](#methods-on-a-screen) extends this one.
+
+## Methods
+
+A **method** is how a screen asks its view model for something: to save, to retry, to open an item. It is an ordinary method of the contract interface, which the view model implements like any other. Methods need no type of their own.
+
+```csharp
+void Retry();
+```
+
+Streams carry values from the view model to the screen. Methods and edits go the other way: the screen calls them. An [edit](#editable-values) proposes a new value for one editable, and the view model settles it before `Edit` returns. A method asks for anything else, and its work may take time. [Events](#state-and-events), like every stream, go from the view model to the screen: the view model publishes an occurrence and the screen receives it. A method is not an event the screen sends, and an event is not a method's reply.
+
+A method returns nothing to the screen. The screen calls it and goes on, and no native code waits on C#. The screen learns the outcome the way it learns everything else: from the streams. So whatever the screen must show about a call, such as a result, progress, an error, or whether a button can be pressed again, is a state, an editable, a keyed list or events that the method changes.
+
+### What a method returns
+
+A method returns `void` or `Task`.
+
+- **`void`**: the method's work is over when it returns. So a view model does not implement a `void` method as `async void`. Such a method's work goes on after the call has returned, and an exception it throws after its first `await` is not a failure Oahu sees: it reaches the UI thread unhandled, where it usually ends the app. A method that awaits is declared `Task`. The analyzer will report an `async void` implementation of a contract's method; nothing does yet.
+- **`Task`**: the method may `await`. Its work goes on after the native call has returned, and ends when the `Task` completes.
+
+The screen calls both the same way, and gets nothing back from either. For the view model, the difference is what reaches the screen before the call returns. Everything a method changes before it returns to its caller reaches the screen before the outermost native call returns, as the [architecture](architecture.md#the-path-of-one-change) says. For an `async` method, that is everything up to its first `await` of something not already complete, where it returns its `Task`. What it changes after that reaches the screen in later delivery turns, like any change. While the method waits at an `await`, delivery turns run as usual, so the screen can show a state that says the work is under way.
+
+### What a method takes
+
+A method takes no parameter, or one. Its one parameter is a **value parameter**, and its type is any type a contract value may have, as [Value types](#value-types) lists, with the exceptions the rest of this page gives: never `OahuUnit`, as [No value](#no-value) says, and never a union's case on its own, as [Rules for values](#rules-for-values) says. A nullable value (`T?`) is allowed. To pass several values, declare a record and take that:
+
+```csharp
+public sealed record Destination(string Folder, bool Overwrite);
+
+void SaveTo(Destination destination);
+```
+
+A method with no parameter sends no bytes: its call is an empty message. A method with a parameter sends that value's bytes, as the [wire format](wire-format.md) gives them for its type.
+
+A `Task` method may also take a `CancellationToken` as its last parameter:
+
+```csharp
+Task Refresh(CancellationToken cancellation);
+Task Search(string text, CancellationToken cancellation);
+```
+
+- **It is not the value parameter.** A method with a token still takes at most one value, and `Search` above takes one.
+- **It is not on the wire.** The screen does not pass it, and the native method has no parameter for it. Oahu passes the token.
+- **It is cancelled when the screen that made the call closes**, as [Teardown](architecture.md#other-operations) says. Use it to stop work whose result no screen will show.
+- **It is the last parameter, there is at most one, and it has no default value.** A `void` method takes no token: its work is over when it returns, so there is nothing left to cancel. A `CancellationToken?` is not the token, and it is not a contract value either.
+
+### What is not allowed
+
+A contract declares streams and methods and nothing else. These rules say what a contract may not declare, and what to do instead.
+
+- **No split or inherited contract.** A contract is one declaration: it is not `partial`, and it extends no interface, not even another contract. Every member is declared on the contract itself, so that its streams and members have one order, as [Order](#order) says. To share something between contracts, share their records, unions and enums.
+- **No result.** A method returns `void` or `Task` and nothing else: not `Task<T>`, `ValueTask`, a nullable `Task?`, a value or a return by reference. Publish the result through a stream.
+- **At most one value parameter.** A method that needs several values takes one record of them. The token does not count.
+- **No parameter modifiers.** A parameter is not `ref`, `out`, `in`, `ref readonly` or `params`. Nothing comes back through a parameter, and the value is sent once. For several values of one type, take an `OahuList<T>` instead of `params`.
+- **No optional parameters.** A parameter has no default value and no `[Optional]` attribute, and neither does the token. Native code always sends the value. Take a nullable value and treat null as "not given", or declare a second method, with a name of its own, that takes no parameter.
+- **No generic methods.** Every type a method takes must be known when the contract is generated. Declare one method for each type, or take a union.
+- **No overloads.** Two methods do not share a name, even when they differ only in their parameters, and `Refresh()` beside `Refresh(CancellationToken)` is an overload too. Native code calls a method by its name alone, so give each method its own name.
+- **No `OahuUnit` parameter.** A method with no value declares no parameter, as [No value](#no-value) says.
+- **No properties that are not streams.** A property of a contract is a get-only property whose type is one of the four stream interfaces, and is not nullable: `IOahuState<T?>`, not `IOahuState<T>?`. It has no setter and no `init` accessor. For something the screen asks for, declare a method.
+- **No indexers.** Use a keyed list or a method.
+- **No C# events.** Use an `IOahuEvents<T>` stream.
+- **No static members.** A contract has no static method, property, field, operator or constructor, including static abstract members.
+- **No default implementations.** A member has no body: the view model implements every member.
+- **Accessible members.** A member is `public`, `internal` or `protected internal`, so that the code Oahu generates in the contract's assembly can call it.
+
+The analyzer, which comes in a later milestone, will enforce these rules: those for [the contract interface](#the-contract-interface); every rule of [Methods](#methods), for what a method returns and takes, the rules above, and the [method names](#method-names) apart from the names taken on the native side, which the native emitters report; the [rules for values](#rules-for-values), with those for rows; and the rule on [no value](#no-value). Nothing enforces them yet.
+
+### Failures
+
+A method that throws, or whose `Task` fails or is cancelled, is a **failure**, as the [architecture](architecture.md#other-operations) says. It is reported to the host, and the app continues.
+
+- **A cancellation after the close is not reported.** Once the screen's token is cancelled, because the screen that made the call closed, an `OperationCanceledException` from a method that takes the token is expected and is not reported, whether the method throws it or its `Task` ends cancelled, and whichever token the exception carries. A method that takes no token reports every cancellation, before the close or after it. This is decided when Oahu observes that the method has ended, on the UI thread, by looking at the screen's token then: Oahu does not ask what cancelled the method or when. So a `Task` cancelled by a timeout of its own shortly before the close, and observed after it, is not reported either.
+- **Any other failure after the close is reported.** A method that throws something else, or whose `Task` fails, is a failure whether or not its screen has closed.
+- **A null `Task` is a fault.** A `Task` method that returns null instead of a `Task` breaks a rule of the seam, so it is a [fault](architecture.md#other-operations), not a failure, and the app ends.
+- **Code after an `await` may run after the close.** The rest of the method, its `catch` and its `finally` run when what it awaits completes: possibly after the screen has closed, and after the host has disposed what it owns for the view model. So that code must not rely on them still being there: check the token, or a flag of the view model's own, first.
+
+Nothing about a failure is returned to the screen. A failure is for what the view model did not expect. When the user should see that something went wrong, such as a save refused or a network that is offline, catch it in the method and publish it through a stream, such as a state that holds an error message.
+
+### Threading and re-entrancy
+
+A method is called on the UI thread, like everything on the seam, as the [architecture](architecture.md#invariants) says. A change it makes to a source must be made on the UI thread too, after an `await` as before one. Where the code after an `await` resumes is specified with the loop. A method's code that continues off the UI thread, as it may after `ConfigureAwait(false)`, must not change a source there: that is a fault.
+
+A call the screen makes while it is receiving a message is not outermost. What it changes is delivered later in the delivery turn already running, not before the call returns, as the [architecture](architecture.md#the-path-of-one-change) says.
+
+Oahu does not wait for a `Task` method to finish before it runs the next call. The screen can call a method again, or call another, while an earlier call waits at an `await`. A disabled button does not stop a second call: a tap already on its way arrives before the screen redraws. So a method that must not overlap itself checks a state's `Current` in its body, such as one that says a save is running, and returns early.
+
+### Method names
+
+- **One name, one method.** Native code calls a method by its name alone, which is why a contract has no overloads.
+- **Names differ in more than letter case.** A contract's stream and method names are compared ordinally, ignoring case, and no two may be equal: not a method `Save` and a state `save`, and not two methods `Save`. Native code writes names in its own casing, such as `save` for a method `Save` in Swift, so the two would be one name there. An editable and its own edit share one name, and that is not a clash.
+- **Some names are taken on the native side.** A generated native model has members of its own, and each native language has keywords, so a few names cannot be a stream's or a method's. Some pairs of names clash on a native platform too, such as a state `Title` beside a method `GetTitle()`: in Kotlin, both are `getTitle()` on the JVM. The native emitters list these names and report these clashes when native code is generated, in later milestones of the [roadmap](roadmap.md).
+
+[Order](#order) says how methods are numbered.
+
+### Methods on a screen
+
+The download screen from the [example](#an-example), with three methods:
+
+```csharp
+[OahuContract]
+public interface IDownloadViewModel
+{
+    IOahuState<string> FileName { get; }
+    IOahuState<DownloadStatus> Status { get; }
+    IOahuEvents<string> Messages { get; }
+
+    void Cancel();
+    void SaveTo(Destination destination);
+    Task Retry(CancellationToken cancellation);
+}
+
+public sealed record Destination(string Folder, bool Overwrite);
+```
+
+While the status is `Running`, the screen shows a Cancel button that calls `Cancel()`. The call sends no bytes. The view model stops the download by cancelling a token source of its own, which the download also watches, and sets the status to `Failed`, so the screen shows the reason as soon as the call returns. When the status is `Done`, the screen lets the user pick a folder and calls `SaveTo` with a `Destination`; the view model saves the file and publishes "Saved" on `Messages`, which the screen shows as a banner. When the status is `Failed`, a Retry button calls `Retry`. The view model sets the status to `Waiting` before its first `await`, so the screen shows that at once, and then awaits the download, setting the status to `Running` and finally `Done` or `Failed`. `Retry` catches the `OperationCanceledException` that `Cancel()` causes. That cancellation is expected, and uncaught it would be reported as a failure, because the screen is still open. After the `await`, `Retry` also checks that it was not cancelled before it sets the status, so that it does not overwrite the `Failed` that `Cancel()` set. The screen waits on none of these calls: it learns each outcome from `Status` and `Messages`. If the user closes the screen during a retry, the token is cancelled and the download stops, and the cancellation is not reported as a failure.
+
 ## Value types
 
 A stream carries values of these types. Each links to the section of the wire format that gives its bytes.
@@ -240,7 +368,7 @@ A keyed list's rows are records or unions, as [Rows and keys](#rows-and-keys) sa
 
 ## Rules for values
 
-The wire format relies on these rules and gives no bytes to a type that breaks one. The analyzer, which comes in a later milestone, will enforce them. Nothing enforces them yet.
+The wire format relies on these rules and gives no bytes to a type that breaks one. The analyzer, which comes in a later milestone, will enforce them, with the other rules of a contract that [What is not allowed](#what-is-not-allowed) lists at its end. Nothing enforces them yet.
 
 - **Records.** All of a record's state is in the parameters of its primary constructor; a property declared in its body can only be computed from them.
 - **Unions.** A union is an abstract record with at least one case. Every record nested in it that derives from it is a case and is sealed, and nothing else derives from it.
@@ -252,6 +380,11 @@ The wire format relies on these rules and gives no bytes to a type that breaks o
 - **List items.** A list's item type is never a record that is no bytes, which is a record whose fields are all records that are no bytes, such as a record with no fields; a nullable value of such a record is allowed.
 - **Rows.** A keyed list's row type is a record or a union, never nullable, that implements `IOahuKeyed` through a positional `string Key` parameter: on the record, or on every case of the union, which passes it unchanged to the union's base record. The `Key` that `IOahuKeyed` returns is the property of that parameter, not another implementation, so the key the screen sees is the one C# compares. A row has no field named `Id`, as [Rows and keys](#rows-and-keys) says.
 - **No value.** `OahuUnit` is only ever the whole type of an events stream, as [No value](#no-value) says.
+- **Type names.** No two enums, records or unions that a contract uses, directly or inside other values, share a simple name, the name without its namespace or containing types, because native code names types by it.
+- **Not generic.** A record, a union or a union's case is not generic.
+- **Accessible.** An enum, record or union that a contract uses is `public` or `internal`, and so is every type it is nested in, as for the contract; an `internal` type of another assembly gives the contract's assembly access with `InternalsVisibleTo`.
+- **Nullable reference types.** They are enabled in the code that declares a contract and the records and unions it uses, so that a type without `?` means a value that is never null, as **Absence** says.
+- **Field names.** No two fields of a record or a union case have names that differ only in letter case, such as `Name` and `name`, because native code could not tell them apart.
 
 ## Lists
 
@@ -313,4 +446,4 @@ Like the rules for values, this rule is not enforced yet; the analyzer will enfo
 
 ## Order
 
-A contract's streams are numbered in the order they are declared. Its members are numbered separately. A member is a method or an editable's edit, so an editable is a stream and also contributes one member. Methods keep the order they are declared in. Where each edit falls in the members' numbering is not decided here: it is defined with the contract model, and nothing should assume it until then. How a contract split across partial declarations, or one that inherits from another interface, is ordered is defined with the contract model, in a later milestone. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.
+A contract's streams are numbered in the order they are declared. Its members are numbered separately. A member is a method or an editable's edit, so an editable is a stream and also contributes one member. Methods keep the order they are declared in, whatever they return and whether or not they take a token. Where each edit falls in the members' numbering is not decided here: it is defined with the contract model, and nothing should assume it until then. A contract is one declaration, as [What is not allowed](#what-is-not-allowed) says, so its declaration order is the order. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.

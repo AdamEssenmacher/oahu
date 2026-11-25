@@ -18,6 +18,30 @@ public sealed class ContractShapeTests
         IOahuKeyedList<TaskRow> Tasks { get; }
     }
 
+    // Each kind of method a contract may declare: void or Task, no value parameter or one, and for a Task method a
+    // trailing CancellationToken.
+    [OahuContract]
+    public interface IDownloadControlsViewModel
+    {
+        IOahuState<string> Status { get; }
+
+        void Cancel();
+
+        void SaveTo(Destination destination);
+
+        void Choose(int? index);
+
+        Task Refresh();
+
+        Task Rename(string name);
+
+        Task Retry(CancellationToken cancellation);
+
+        Task Search(string text, CancellationToken cancellation);
+    }
+
+    public sealed record Destination(string Folder, bool Overwrite);
+
     public sealed record TaskRow(string Key, string Text, bool Done) : IOahuKeyed;
 
     // A union row: every case has the positional Key, passed to the union's own.
@@ -100,6 +124,42 @@ public sealed class ContractShapeTests
     {
         public IOahuKeyedList<TaskRow> Tasks { get; } =
             new FixedKeyedList<TaskRow>([new TaskRow("t0", "Milk", false)]);
+    }
+
+    // Implements every method with no behavior: nothing calls a contract's methods yet.
+    private sealed class DownloadControlsViewModel : IDownloadControlsViewModel
+    {
+        public IOahuState<string> Status { get; } = new FixedState<string>("waiting");
+
+        public void Cancel()
+        {
+        }
+
+        public void SaveTo(Destination destination)
+        {
+        }
+
+        public void Choose(int? index)
+        {
+        }
+
+        public Task Refresh() => Task.CompletedTask;
+
+        public Task Rename(string name) => Task.CompletedTask;
+
+        public Task Retry(CancellationToken cancellation) => Task.CompletedTask;
+
+        public Task Search(string text, CancellationToken cancellation) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public void A_class_implements_a_contract_with_each_kind_of_method()
+    {
+        // A compile-time shape check and nothing more: a contract can declare each kind of method the contract rules
+        // allow, and a class implement it. It calls no method and tests no behavior; nothing dispatches a method yet.
+        IDownloadControlsViewModel viewModel = new DownloadControlsViewModel();
+
+        Assert.Equal("waiting", viewModel.Status.Current);
     }
 
     [Fact]
