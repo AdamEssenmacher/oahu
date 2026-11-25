@@ -47,6 +47,7 @@ public sealed class OahuWriter
     /// Writes <paramref name="value"/> as an unsigned variable-length integer, in the shortest form: 1 to 10 bytes.
     /// </summary>
     /// <param name="value">The value to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
     public void WriteVarUInt(ulong value)
     {
         var size = VarUIntSize(value);
@@ -64,6 +65,7 @@ public sealed class OahuWriter
     /// <summary>Writes a count, such as a length or a number of items, as an unsigned variable-length integer.</summary>
     /// <param name="count">The count to write.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
     public void WriteCount(int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
