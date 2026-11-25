@@ -13,7 +13,8 @@ namespace AdamE.Oahu;
 /// row's fields, and it crosses the seam like any other field. In a union, each case passes its own <c>Key</c>
 /// parameter, unchanged, to the union's base record, as in <c>Card(string Key, string Text) : BoardRow(Key)</c>, so
 /// that the interface's <see cref="Key"/> is the case's <c>Key</c> field. <c>Card(string Key, string Text) :
-/// BoardRow(Text)</c> compiles, and then <see cref="Key"/> returns the text. A row has no field named <c>Id</c>: a
+/// BoardRow(Text)</c> is a mistake that the compiler reports only as warning CS8907, an unread parameter. Where warnings
+/// are not errors it builds, and then <see cref="Key"/> returns the text. A row has no field named <c>Id</c>: a
 /// native row can be identified by its key under the name <c>id</c>, as a Swift <c>Identifiable</c> is, and a field
 /// named <c>Id</c> would take that name too. The analyzer, which comes in a later milestone, will enforce these rules.
 /// Nothing enforces them yet.

@@ -111,7 +111,7 @@ public abstract record BoardRow(string Key) : IOahuKeyed
 }
 ```
 
-Each case passes its own `Key` parameter to the union's, so that the interface's `Key` is the case's `Key` field. `Card(string Key, string Text) : BoardRow(Text)` compiles too, and then `Key` returns the text.
+Each case passes its own `Key` parameter to the union's, so that the interface's `Key` is the case's `Key` field. `Card(string Key, string Text) : BoardRow(Text)` is a mistake that the compiler reports only as warning CS8907, an unread parameter. In a project where warnings are not errors it builds, and then `Key` returns the text.
 
 - **A key is the row's identity.** An operation that names a row with a key names the same row as every earlier one with that key. A row that changes its value and keeps its key is the same row, replaced. A row whose key changes is another row: remove the old one and insert the new one.
 - **Keys are unique within a list at every moment**: before and after every operation, including between the operations of one batch. A key can be used again once the row that had it is removed, even later in the same batch. A batch that would give two rows one key is not valid, as [Batches](#batches) says.
