@@ -376,10 +376,12 @@ public ref struct OahuReader
     /// before the check.
     /// </para>
     /// <para>
-    /// The items are returned in an array of exactly the count's length. Apart from what <paramref name="readItem"/>
-    /// allocates for the items, that array is the only allocation. An empty list allocates nothing: it is the same shared
-    /// empty instance every time. Pass a method group of a static method or a <see langword="static"/> lambda for
-    /// <paramref name="readItem"/>, so that the delegate is created once and cached.
+    /// The items are returned as an <see cref="OahuList{T}"/> over an array of exactly the count's length, which the
+    /// list owns: the array is not copied, and nothing else can reach it. Apart from what <paramref name="readItem"/>
+    /// allocates for the items, that array is the only allocation. An empty list allocates nothing: it is the empty
+    /// <see cref="OahuList{T}"/>, <see cref="OahuList{T}.Empty"/>. Pass a method group of a static method or a
+    /// <see langword="static"/> lambda for <paramref name="readItem"/>, so that the delegate is created once and
+    /// cached.
     /// </para>
     /// <para>
     /// When the count is rejected, the reader stays where it was, at the start of the list. If
@@ -398,14 +400,14 @@ public ref struct OahuReader
     /// <exception cref="InvalidOperationException">
     /// An item left the nesting depth different from what it was before it.
     /// </exception>
-    public IReadOnlyList<T> ReadList<T>(OahuReadFunc<T> readItem)
+    public OahuList<T> ReadList<T>(OahuReadFunc<T> readItem)
     {
         ArgumentNullException.ThrowIfNull(readItem);
 
         var start = _offset;
         var count = ReadCount();
         if (count == 0)
-            return Array.Empty<T>();
+            return OahuList<T>.Empty;
 
         var available = _input.Length - _offset;
         if (count > available)
@@ -433,7 +435,7 @@ public ref struct OahuReader
             }
         }
 
-        return items;
+        return OahuList<T>.Own(items);
     }
 
     /// <summary>

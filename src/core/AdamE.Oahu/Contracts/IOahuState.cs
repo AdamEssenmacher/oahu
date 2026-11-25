@@ -13,9 +13,15 @@ namespace AdamE.Oahu;
 /// <para>
 /// A new observer receives the current value at once, during <see cref="IObservable{T}.Subscribe"/>, before that call
 /// returns. Then, in later delivery turns, it receives the value current at that time, when it differs from the last
-/// one that observer received. Contract values compare by structure. For a list, that takes Oahu's own comparison,
-/// which arrives with structural equality in a later part of the vocabulary: the default comparer compares two lists
-/// by reference, so an implementation that uses it delivers an equal list again.
+/// one that observer received.
+/// </para>
+/// <para>
+/// "Differs" is C# equality: a value differs from another when <see cref="EqualityComparer{T}.Default"/> says they
+/// are not equal, and an implementation compares values that way. A record compares field by field, and a list, which
+/// is an <see cref="OahuList{T}"/>, compares by its items, so a value rebuilt with the same content is not delivered
+/// again. A <see cref="double"/> compares as C# compares it: a NaN equals any other NaN, and 0.0 equals -0.0, so a
+/// change from one to the other is not delivered, though their bytes differ. A <see cref="DateTimeOffset"/> compares
+/// by instant, whatever its offset, and a string compares ordinally.
 /// </para>
 /// <para>
 /// Observers hear of a change in a later delivery turn, never during the call that changed the value: no observer

@@ -45,6 +45,19 @@ AdamE.Oahu.ListOp<T>.Replace.Item.init -> void
 AdamE.Oahu.ListOp<T>.Replace.Replace(int Index, T Item) -> void
 AdamE.Oahu.OahuContractAttribute
 AdamE.Oahu.OahuContractAttribute.OahuContractAttribute() -> void
+AdamE.Oahu.OahuList
+AdamE.Oahu.OahuList<T>
+AdamE.Oahu.OahuList<T>.AsSpan() -> System.ReadOnlySpan<T>
+AdamE.Oahu.OahuList<T>.Count.get -> int
+AdamE.Oahu.OahuList<T>.Enumerator
+AdamE.Oahu.OahuList<T>.Enumerator.Current.get -> T
+AdamE.Oahu.OahuList<T>.Enumerator.Enumerator() -> void
+AdamE.Oahu.OahuList<T>.Enumerator.MoveNext() -> bool
+AdamE.Oahu.OahuList<T>.Equals(AdamE.Oahu.OahuList<T> other) -> bool
+AdamE.Oahu.OahuList<T>.GetEnumerator() -> AdamE.Oahu.OahuList<T>.Enumerator
+AdamE.Oahu.OahuList<T>.IsEmpty.get -> bool
+AdamE.Oahu.OahuList<T>.OahuList() -> void
+AdamE.Oahu.OahuList<T>.this[int index].get -> T
 AdamE.Oahu.OahuUnit
 AdamE.Oahu.OahuUnit.Equals(AdamE.Oahu.OahuUnit other) -> bool
 AdamE.Oahu.OahuUnit.OahuUnit() -> void
@@ -65,7 +78,7 @@ AdamE.Oahu.Wire.OahuReader.ReadDuration() -> System.TimeSpan
 AdamE.Oahu.Wire.OahuReader.ReadIndex(int count) -> int
 AdamE.Oahu.Wire.OahuReader.ReadInstant() -> System.DateTimeOffset
 AdamE.Oahu.Wire.OahuReader.ReadInt() -> int
-AdamE.Oahu.Wire.OahuReader.ReadList<T>(AdamE.Oahu.Wire.OahuReadFunc<T>! readItem) -> System.Collections.Generic.IReadOnlyList<T>!
+AdamE.Oahu.Wire.OahuReader.ReadList<T>(AdamE.Oahu.Wire.OahuReadFunc<T>! readItem) -> AdamE.Oahu.OahuList<T>
 AdamE.Oahu.Wire.OahuReader.ReadLong() -> long
 AdamE.Oahu.Wire.OahuReader.ReadPresence() -> bool
 AdamE.Oahu.Wire.OahuReader.ReadString() -> string!
@@ -86,7 +99,7 @@ AdamE.Oahu.Wire.OahuWriter.WriteDuration(System.TimeSpan value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteIndex(int index, int count) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInstant(System.DateTimeOffset value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInt(int value) -> void
-AdamE.Oahu.Wire.OahuWriter.WriteList<T>(System.Collections.Generic.IReadOnlyList<T>! items, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! writeItem) -> void
+AdamE.Oahu.Wire.OahuWriter.WriteList<T>(AdamE.Oahu.OahuList<T> items, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! writeItem) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteLong(long value) -> void
 AdamE.Oahu.Wire.OahuWriter.WritePresence(bool present) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
@@ -118,6 +131,9 @@ override AdamE.Oahu.ListOp<T>.Replace.Equals(object? obj) -> bool
 override AdamE.Oahu.ListOp<T>.Replace.GetHashCode() -> int
 override AdamE.Oahu.ListOp<T>.Replace.ToString() -> string!
 override AdamE.Oahu.ListOp<T>.ToString() -> string!
+override AdamE.Oahu.OahuList<T>.Equals(object? obj) -> bool
+override AdamE.Oahu.OahuList<T>.GetHashCode() -> int
+override AdamE.Oahu.OahuList<T>.ToString() -> string!
 override AdamE.Oahu.OahuUnit.GetHashCode() -> int
 override AdamE.Oahu.OahuUnit.ToString() -> string!
 override sealed AdamE.Oahu.ListOp<T>.Clear.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
@@ -137,6 +153,13 @@ static AdamE.Oahu.ListOp<T>.Remove.operator !=(AdamE.Oahu.ListOp<T>.Remove? left
 static AdamE.Oahu.ListOp<T>.Remove.operator ==(AdamE.Oahu.ListOp<T>.Remove? left, AdamE.Oahu.ListOp<T>.Remove? right) -> bool
 static AdamE.Oahu.ListOp<T>.Replace.operator !=(AdamE.Oahu.ListOp<T>.Replace? left, AdamE.Oahu.ListOp<T>.Replace? right) -> bool
 static AdamE.Oahu.ListOp<T>.Replace.operator ==(AdamE.Oahu.ListOp<T>.Replace? left, AdamE.Oahu.ListOp<T>.Replace? right) -> bool
+static AdamE.Oahu.OahuList.Create<T>(params System.ReadOnlySpan<T> items) -> AdamE.Oahu.OahuList<T>
+static AdamE.Oahu.OahuList.CreateRange<T>(System.Collections.Generic.IEnumerable<T>! items) -> AdamE.Oahu.OahuList<T>
+static AdamE.Oahu.OahuList.ToOahuList<T>(this System.Collections.Generic.IEnumerable<T>! items) -> AdamE.Oahu.OahuList<T>
+static AdamE.Oahu.OahuList.ToOahuList<T>(this System.ReadOnlySpan<T> items) -> AdamE.Oahu.OahuList<T>
+static AdamE.Oahu.OahuList<T>.Empty.get -> AdamE.Oahu.OahuList<T>
+static AdamE.Oahu.OahuList<T>.operator !=(AdamE.Oahu.OahuList<T> left, AdamE.Oahu.OahuList<T> right) -> bool
+static AdamE.Oahu.OahuList<T>.operator ==(AdamE.Oahu.OahuList<T> left, AdamE.Oahu.OahuList<T> right) -> bool
 static AdamE.Oahu.OahuUnit.Value.get -> AdamE.Oahu.OahuUnit
 static AdamE.Oahu.OahuUnit.operator !=(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool
 static AdamE.Oahu.OahuUnit.operator ==(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool

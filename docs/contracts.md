@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, and the no-value type `OahuUnit`. The wire format gives the bytes of a keyed list's batch, in [Keyed-list batches](wire-format.md#keyed-list-batches). Later pull requests add methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is complete, apart from methods. What exists, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, the no-value type `OahuUnit`, and the list type `OahuList<T>`, through which contract values compare by content, as [Equality](#equality) says. The wire format gives the bytes of a keyed list's batch, in [Keyed-list batches](wire-format.md#keyed-list-batches). A contract's methods are outlined in the [architecture](architecture.md#the-central-idea), but this page does not give their rules yet: what a method may return and take arrives in the next pull request of this milestone. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -23,7 +23,7 @@ The vocabulary has four kinds of stream: state and events, described here, [edit
 **State** (`IOahuState<T>`) is a value that always has a current one: a title, a count, the status of a download. Use it for anything the screen draws from.
 
 - `Current` is the value now. When the view model changes it, `Current` changes at once.
-- A new observer receives the current value at once, during `Subscribe`. Then, in later delivery turns, it receives the value current at that time, when it differs from the last one that observer received. Contract values compare by structure. For a list, that takes Oahu's own comparison, which arrives with structural equality in a later part of the vocabulary: the default comparer compares two lists by reference, so an implementation that uses it delivers an equal list again.
+- A new observer receives the current value at once, during `Subscribe`. Then, in later delivery turns, it receives the value current at that time, when it differs from the last one that observer received. Values compare as C# compares them, with `EqualityComparer<T>.Default`, as [Equality](#equality) says: a record or a list rebuilt with the same content is the same value, and is not delivered again.
 - Observers hear of a change in a later delivery turn, never during the call that changed it: no observer runs while that call is on the stack. A turn can run before the method that made the change has finished, when that method is waiting at an `await`. So several changes before a turn can arrive as one value, and a change and its reversal as none.
 - A state never completes and never fails.
 
@@ -58,7 +58,7 @@ These rules, like those above, are requirements on every implementation:
 
 - **It is a state.** Everything above that applies to a state applies to an editable: `Current` is the value now, a new observer receives it during `Subscribe`, later changes arrive in later delivery turns and only when they differ, disposal stops delivery at once, it never completes or fails, and it is used only on the UI thread. Anything that takes a state can take an editable.
 - **An edit is a proposal.** The screen calls `Edit(value)`. The implementation may accept the value, change it (trim text, clamp a number to a range) or refuse it, and it must settle on one of these before `Edit` returns. When `Edit` returns, `Current` is the result.
-- **What an edit changes.** If the settled value differs from the value held before the call, the edit is a change to the state and is delivered under the state's rules, merged with any other changes before the next delivery turn. If it is the same, the edit changes nothing, whatever value was proposed. That is what a refusal looks like, and also a change that lands back on the value held before, such as text cut down to a length it already had. "Differs" and "the same" follow the state's rule: contract values compare by structure. How lists and doubles compare, such as 0.0 and -0.0, or NaN, is defined with structural equality, a later part of the vocabulary.
+- **What an edit changes.** If the settled value differs from the value held before the call, the edit is a change to the state and is delivered under the state's rules, merged with any other changes before the next delivery turn. If it is the same, the edit changes nothing, whatever value was proposed. That is what a refusal looks like, and also a change that lands back on the value held before, such as text cut down to a length it already had. "Differs" and "the same" follow the state's rule, which [Equality](#equality) gives. So 0.0 and -0.0 are the same, and so are two NaNs: an edit from one to the other changes nothing.
 - **Settling is not delivering.** No observer runs while `Edit` is on the stack. Delivering the result is the exporter's work, as below, not the implementation's.
 - **Settle now.** The result is what `Current` holds when `Edit` returns, so an edit cannot settle later, after an `await`, a timer or a posted callback. Work that must be asynchronous, such as checking a name with a server, is done another way: settle now on what is known, and report the outcome through another stream, such as a state that holds an error message. A later change the view model makes in its own way is a new change, not the edit's result.
 - **One thread.** `Edit` is called on the UI thread. Calling it on another thread is a fault, even if the edit would be refused.
@@ -89,7 +89,7 @@ The screen binds a text field to the title. The model has the title from the mom
 
 A **keyed list** (`IOahuKeyedList<T>`) is a list of rows with stable keys, such as the rows of a table or the messages of a chat. It is sent to the screen as operations on the list, not as the list, so that a native list can animate each change and keep each row's identity: its place on screen, its selection, its scroll position.
 
-Use it instead of a state of a list, `IOahuState<IReadOnlyList<T>>`, when the screen shows the items as rows that the user sees come, go and move. A state of a list replaces the whole list: each change delivers the new list, and the screen has only the new list to tell what changed. A keyed list delivers the changes themselves, and each costs what it changes, not the whole list. A state of a list is still right for a small list that the screen draws as one thing, such as the names in a line of text.
+Use it instead of a state of a list, `IOahuState<OahuList<T>>`, when the screen shows the items as rows that the user sees come, go and move. A state of a list replaces the whole list: each change delivers the new list, and the screen has only the new list to tell what changed. A keyed list delivers the changes themselves, and each costs what it changes, not the whole list. A state of a list is still right for a small list that the screen draws as one thing, such as the names in a line of text.
 
 These rules, like those above, are requirements on every implementation.
 
@@ -139,7 +139,7 @@ A note for native runtimes: SwiftUI's `move(fromOffsets:toOffset:)` takes the de
 
 An item is never null. A move to its own index and a replace with an equal value change nothing, and are still operations.
 
-Operations compare with C# record equality: two are equal when they are the same case with equal arguments, and a row compares with its type's `Equals`. The default comparer compares a list field of a record by reference, so two operations whose rows are equal by structure but hold different list instances are not equal, and a replace with such a row is not a replace with an equal value. Oahu's own comparison arrives with structural equality in a later part of the vocabulary.
+Operations compare with C# record equality: two are equal when they are the same case with equal arguments, and a row compares with its type's `Equals`. A row's list field is an `OahuList<T>`, which compares by its items, so two operations whose rows have equal content are equal, whichever list instances they hold, as [Equality](#equality) says.
 
 An operation checks nothing when it is created, not even that an index is not negative: whether an index is in range depends on the list it applies to, so whoever applies the operation checks it there.
 
@@ -154,12 +154,14 @@ Each notification of a keyed list is a **batch**: a list of operations, `IReadOn
 - **Replay.** A new observer receives the current rows during `Subscribe`, before it returns, as one batch: a `Clear`, then an `Insert` of each row of `Items`, in order, at indexes 0, 1, 2 and on. For an empty list it is one `Clear`.
 - **Delivery.** Then, in later delivery turns, an observer receives every operation applied since its last delivery, or since its replay, in order, as one batch. No operation is dropped, merged with another or reordered, and none reaches it twice: an operation applied before it subscribed is part of its replay. Several batches applied before a turn arrive as one batch, the operations of the first followed by those of the next. A delivered batch is never empty.
 - **More than one in a turn.** A delivery turn runs until its queue is empty, as the [architecture](architecture.md#the-path-of-one-change) says. So when the list changes during a turn, after an observer has received its batch, the observer receives those operations as another batch later in the same turn.
-- **A delivered batch is a value.** It never changes afterwards, contains no null operation, and may be one list instance shared by several observers.
+- **A delivered batch never changes.** It never changes afterwards, contains no null operation, and may be one list instance shared by several observers.
 - **What the observer holds.** Applying every batch an observer has received, in order, to an empty list gives the rows `Items` had after the last operation that observer received.
-- **`Items` is a value.** A list that `Items` returned does not change afterwards; a later change gives a new list.
+- **`Items` never changes.** A list that `Items` returned does not change afterwards; a later change gives a new list.
 - **Like the other streams.** Observers hear of a change in a later delivery turn, never during the call that changed the list. Disposing a subscription stops all delivery to it at once. A keyed list never completes and never fails. It is used only on the UI thread: `Items` is read there, observers subscribe and dispose there, and batches are delivered there; changing a keyed list on another thread is a fault. An exception thrown by an observer is a fault. [State and events](#state-and-events) gives these rules in full.
 
 The exporter writes each batch, the replay included, as one message, and the native model applies it all together or not at all, so the screen's list is never left half-changed. The wire format's [Keyed-list batches](wire-format.md#keyed-list-batches) gives a batch's bytes.
+
+`Items` is an `IReadOnlyList<T>`, and a batch an `IReadOnlyList<ListOp<T>>`, not an `OahuList<T>`, because neither is a contract value. A keyed list changes by operations, so `Items` is a read-only view of its content now, and the implementation chooses the storage behind it: a source of many rows can keep a persistent list and not copy every row on every change. So the two rules above, that a list `Items` returned and a delivered batch never change, are the implementation's duty; the type does not enforce them. The rows, and any list inside a row, are contract values, and such a list is an `OahuList<T>`.
 
 `IOahuKeyedList<T>` is invariant: a batch is a list of `ListOp<T>`, which is a record, and a class cannot vary in its type argument. So a keyed list of one row type is never a keyed list of another.
 
@@ -231,7 +233,7 @@ A stream carries values of these types. Each links to the section of the wire fo
 | [Record](wire-format.md#records) | A positional `sealed record` or `readonly record struct` |
 | [Union](wire-format.md#unions) | An abstract record with its cases nested in it |
 | [Nullable value](wire-format.md#nullable-values) | `T?` of any of these except a nullable value: a nullable value's type is never itself nullable |
-| [List](wire-format.md#lists) | `IReadOnlyList<T>` of any of these |
+| [List](wire-format.md#lists) | `OahuList<T>` of any of these, as [Lists](#lists) says |
 | [No value](wire-format.md#the-no-value-type) | `OahuUnit`, only as the whole type of an events stream, as [No value](#no-value) says |
 
 A keyed list's rows are records or unions, as [Rows and keys](#rows-and-keys) says, and its batches are written as [Keyed-list batches](wire-format.md#keyed-list-batches) says. No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
@@ -243,6 +245,7 @@ The wire format relies on these rules and gives no bytes to a type that breaks o
 - **Records.** All of a record's state is in the parameters of its primary constructor; a property declared in its body can only be computed from them.
 - **Unions.** A union is an abstract record with at least one case. Every record nested in it that derives from it is a case and is sealed, and nothing else derives from it.
 - **Cases.** A case record is never used on its own, as the type of a field, a list's items, a nullable value, a stream or a method's argument; use the union there, or a separate record with the same fields.
+- **Lists.** A list in a contract value is an `OahuList<T>` and nothing else: not `IReadOnlyList<T>`, an array, `List<T>` or `ImmutableArray<T>`. Those compare by reference, so a record holding one would compare unequal to a rebuilt copy of itself, and they can change after they are delivered. With `OahuList<T>`, the compiler's record equality is Oahu's equality, as [Equality](#equality) says.
 - **Absence.** `?` is the only way a value can be absent. A value whose type has no `?` is never null: a string, a record or a list has no presence byte.
 - **Cycles.** No record contains its own type through record fields alone, directly or through other records, with no list, nullable value or union on the way.
 - **Enums.** An enum has at least one member, no two members with the same number, and no `[Flags]` attribute.
@@ -250,18 +253,59 @@ The wire format relies on these rules and gives no bytes to a type that breaks o
 - **Rows.** A keyed list's row type is a record or a union, never nullable, that implements `IOahuKeyed` through a positional `string Key` parameter: on the record, or on every case of the union, which passes it unchanged to the union's base record. The `Key` that `IOahuKeyed` returns is the property of that parameter, not another implementation, so the key the screen sees is the one C# compares. A row has no field named `Id`, as [Rows and keys](#rows-and-keys) says.
 - **No value.** `OahuUnit` is only ever the whole type of an events stream, as [No value](#no-value) says.
 
+## Lists
+
+A list in a contract value is an `OahuList<T>`: a list field of a record or a union case, a state of a list, and a list in a list or a nullable value. It is in the `AdamE.Oahu` namespace, is immutable, and compares by its items.
+
+```csharp
+public sealed record Item(string Name, OahuList<string> Tags);
+
+OahuList<string> tags = ["dairy", "fridge"];
+var milk = new Item("Milk", tags);
+var bread = new Item("Bread", []);
+
+List<string> labels = ["box", ""];
+var eggs = new Item("Eggs", labels.Where(label => label.Length > 0).ToOahuList());
+```
+
+- **Building one.** A collection expression builds a list, and `[]` is the empty list. `OahuList.Create` takes items, an array or a span, and `ToOahuList()` and `OahuList.CreateRange` take any `IEnumerable<T>`. Each copies the items, so changing the array or list it was built from afterwards does not change it. The source never sees the array the list keeps, so not even a collection of your own can change the list afterwards.
+- **What building costs.** A collection expression of items, such as `["dairy", "fridge"]`, copies them once. One with a spread, such as `[.. big, 5]`, copies them twice: the compiler gathers the items into a span, and the list copies the span. For a large array or `List<T>`, use `big.ToOahuList()`, which copies once.
+- **Immutable.** Nothing changes a list once it is built: it has no member that changes it, and none of its interfaces has one. A list that is delivered is never changed afterwards, and to change a value, build a new list.
+- **Never null.** `OahuList<T>` is a struct, so a list field is never null. `default` is the empty list, the same value as `[]` and `OahuList<T>.Empty`. A list that may be absent is `OahuList<T>?`, which has a presence byte on the wire, as [Nullable values](wire-format.md#nullable-values) says; an absent list and an empty one are different values.
+- **Reading one.** It is an `IReadOnlyList<T>`, with an indexer and `Count`, and `AsSpan()` gives its items as a span. `foreach` over it allocates nothing. Using it as an interface, as LINQ does, boxes it, which allocates, so a codec uses the list itself: `OahuWriter.WriteList` takes an `OahuList<T>`.
+- **LINQ enumerates it.** It implements no collection interface that could change it, such as `ICollection<T>`, so LINQ's `Count()` and `ToList()` go through its items one by one. Use `Count` and `AsSpan()` instead.
+- **`ToString` writes every item**, as a collection expression would, such as `[dairy, fridge]`, so the text of a large list is large.
+
+## Equality
+
+A state or an editable delivers a value only when it differs from the last value that observer received, and an edit that settles on a value equal to the one held changes nothing. Equal means equal as C# compares it:
+
+- **Values compare with `EqualityComparer<T>.Default`.** That is the comparison a record's compiler-generated `Equals` makes for each field, and the one an `OahuList<T>` makes for each item. So `==` on a record of a contract is exactly the comparison Oahu makes: two records are equal when they are the same type and their fields are equal, and two lists are equal when they have the same count and their items are equal in order. It holds all the way down, through records in lists, lists in records and union cases, and nullable values, because every list is an `OahuList<T>`. A record rebuilt with the same fields and items equals the one before, and setting a state to it delivers nothing.
+- **Doubles.** A NaN equals any other NaN, whatever its bits, and 0.0 equals -0.0. This is `double.Equals`, not the `==` operator on two doubles, under which a NaN differs from itself. Each pair has different bytes on the wire, so a change from 0.0 to -0.0, or from one NaN to another, delivers nothing, and the screen goes on showing the value it had: 0, not -0.
+- **Instants.** A `DateTimeOffset` compares by instant, whatever its offset: 15:00 at +00:00 equals 05:00 the next day at +14:00. The wire format does not carry the offset, so the screen loses nothing.
+- **Strings** compare ordinally, by their UTF-16 code units, with no culture and no Unicode normalization. A composed é (U+00E9) and a decomposed one (`e` followed by U+0301) are different values, and a change from one to the other is delivered.
+
+Equal is not the same as having the same bytes. The doubles above are equal but have different bytes, and these values are not equal but have the same bytes, so a change from one to the other delivers a message the screen already has. Each costs at most a redundant delivery:
+
+- two instants in the same millisecond that differ in their ticks, since the wire format writes whole milliseconds;
+- a string with a lone surrogate and the same string with U+FFFD in its place, since the writer writes a lone surrogate as U+FFFD.
+
+What an author must still not do: give a record of a contract its own `Equals` that does not compare all its fields. Oahu uses the record's `Equals`, as `==` does, so a wrong one is wrong for Oahu too. An `Equals` that calls two different values equal leaves the screen stale: the view model changes the value, and the screen goes on showing the old one. One that calls two equal values different only costs redundant deliveries. A record's `GetHashCode` must agree with its `Equals`, as .NET requires.
+
+Comparing costs time linear in the size of the value: on each change, the new value is compared with the last one delivered, field by field and item by item. Two copies of one list, such as an unchanged list field of a record copied with `with`, compare at once, without looking at their items. A list's hash code is linear too, and is not cached. A large list that changes often belongs in a [keyed list](#keyed-lists), whose changes cost what they change.
+
 ## No value
 
 `OahuUnit` is the type of a stream that carries no value: `IOahuEvents<OahuUnit>`. That is the only place a contract may use it. It is never:
 
 - the type of any stream but events: a state (`IOahuState<OahuUnit>`), an editable value or a keyed list;
 - nullable (`OahuUnit?`), even as an events stream's type: `IOahuEvents<OahuUnit?>` is not allowed;
-- a list's item type (`IReadOnlyList<OahuUnit>`), a record's field or a union case's field;
+- a list's item type (`OahuList<OahuUnit>`), a record's field or a union case's field;
 - a method's argument.
 
 Use something else in those places. A method with no argument declares no parameter, not an `OahuUnit` one. A state always has a value, and that value is worth a real type: a `bool`, an enum or a record. `IOahuEvents<OahuUnit?>` would say no more than `IOahuEvents<OahuUnit>`, so write that instead. Where a value with nothing in it is wanted elsewhere, declare a record with no fields, such as `public sealed record Empty();`. It is no bytes too, but it is an ordinary record, allowed wherever a record is except as a list's item type, and its name says what it means. The rule on `OahuUnit` catches accidents; a record with no fields is a deliberate choice.
 
-A list of things that have no content can use neither `OahuUnit` nor a record with no fields as its item type. Carry how many there are as an `int`, use a list of a nullable empty record (`IReadOnlyList<Empty?>`), whose items are each one byte, or give the items a real field.
+A list of things that have no content can use neither `OahuUnit` nor a record with no fields as its item type. Carry how many there are as an `int`, use a list of a nullable empty record (`OahuList<Empty?>`), whose items are each one byte, or give the items a real field.
 
 Like the rules for values, this rule is not enforced yet; the analyzer will enforce it.
 

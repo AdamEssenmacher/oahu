@@ -23,9 +23,9 @@ namespace AdamE.Oahu;
 /// </para>
 /// <para>
 /// Two operations are equal when they are the same case with equal arguments, by C# record equality: a row compares
-/// with its type's <see cref="object.Equals(object)"/>. For a record row, the default comparer compares a list field by
-/// reference, so two operations whose rows are equal by structure but hold different list instances are not equal.
-/// Oahu's own comparison arrives with structural equality in a later part of the vocabulary.
+/// with its type's <see cref="object.Equals(object)"/>. A row's list field is an <see cref="OahuList{T}"/>, which
+/// compares by its items, so two operations whose rows have equal content are equal, whichever list instances they
+/// hold.
 /// </para>
 /// <para>
 /// It is shaped like a contract union, but it is not a contract value: a contract never declares it as the type of a

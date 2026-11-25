@@ -52,8 +52,10 @@ public interface IOahuEditable<T> : IOahuState<T>
     /// that lands back on the value held before, such as text cut down to a length it already had.
     /// </para>
     /// <para>
-    /// "Differs" and "the same" follow the state's rule: contract values compare by structure. How lists and doubles
-    /// compare, such as 0.0 and -0.0, or NaN, is defined with structural equality, a later part of the vocabulary.
+    /// "Differs" and "the same" follow the state's rule, C# equality: the settled value is the same as the value held
+    /// before when <see cref="EqualityComparer{T}.Default"/> says they are equal. A record compares field by field and
+    /// a list, an <see cref="OahuList{T}"/>, by its items. A <see cref="double"/> NaN is the same as any other NaN, and
+    /// 0.0 is the same as -0.0, so an edit from one to the other changes nothing.
     /// </para>
     /// <para>
     /// Settling is not delivering. No observer runs while <see cref="Edit"/> is on the stack. The exporter delivers the

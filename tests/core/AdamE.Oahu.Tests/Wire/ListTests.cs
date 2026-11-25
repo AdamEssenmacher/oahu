@@ -5,8 +5,11 @@ namespace AdamE.Oahu.Tests.Wire;
 
 public sealed class ListTests
 {
-    // Keeps each list read in the allocation tests reachable, so that the runtime cannot drop or stack-allocate it.
+    // Keep each array and list made in the allocation tests reachable, so that the runtime cannot drop or
+    // stack-allocate it. A list is kept in a field of its own type, because storing it as an object would box it.
     private static object? _sink;
+    private static OahuList<int> _ints;
+    private static OahuList<string> _strings;
 
     public static TheoryData<int[], string> IntCases => new()
     {
@@ -20,7 +23,7 @@ public sealed class ListTests
     public void A_list_of_ints_is_its_count_then_each_int(int[] items, string hex)
     {
         var writer = new OahuWriter();
-        writer.WriteList(items, WriteIntItem);
+        writer.WriteList(items.ToOahuList(), WriteIntItem);
 
         Assert.Equal(hex, Hex.Of(writer.WrittenSpan));
 
@@ -42,7 +45,7 @@ public sealed class ListTests
     public void A_list_of_strings_is_its_count_then_each_string(string[] items, string hex)
     {
         var writer = new OahuWriter();
-        writer.WriteList(items, WriteStringItem);
+        writer.WriteList(items.ToOahuList(), WriteStringItem);
 
         Assert.Equal(hex, Hex.Of(writer.WrittenSpan));
 
@@ -63,7 +66,7 @@ public sealed class ListTests
     public void A_list_of_bools_is_its_count_then_each_bool(bool[] items, string hex)
     {
         var writer = new OahuWriter();
-        writer.WriteList(items, WriteBoolItem);
+        writer.WriteList(items.ToOahuList(), WriteBoolItem);
 
         Assert.Equal(hex, Hex.Of(writer.WrittenSpan));
 
@@ -84,7 +87,7 @@ public sealed class ListTests
     public void A_list_of_doubles_is_its_count_then_each_double(double[] items, string hex)
     {
         var writer = new OahuWriter();
-        writer.WriteList(items, WriteDoubleItem);
+        writer.WriteList(items.ToOahuList(), WriteDoubleItem);
 
         Assert.Equal(hex, Hex.Of(writer.WrittenSpan));
 
@@ -99,7 +102,7 @@ public sealed class ListTests
     [Fact]
     public void A_list_of_lists_is_its_count_then_each_inner_list()
     {
-        int[][] items = [[], [1], [2, 3]];
+        OahuList<OahuList<int>> items = [[], [1], [2, 3]];
 
         var writer = new OahuWriter();
         writer.WriteList(items, static (w, list) => w.WriteList(list, WriteIntItem));
@@ -108,16 +111,14 @@ public sealed class ListTests
 
         var reader = new OahuReader(writer.WrittenSpan);
         var read = reader.ReadList(static (ref OahuReader r) => r.ReadList(ReadIntItem));
-        Assert.Equal(items.Length, read.Count);
-        for (var i = 0; i < items.Length; i++)
-            Assert.Equal<int>(items[i], read[i]);
+        Assert.Equal(items, read);
         reader.EnsureEnd();
     }
 
     [Fact]
     public void A_list_of_nullable_strings_has_a_presence_byte_for_each_item()
     {
-        string?[] items = [null, "x", "", null];
+        OahuList<string?> items = [null, "x", "", null];
 
         var writer = new OahuWriter();
         writer.WriteList(items, WriteNullableStringItem);
@@ -132,7 +133,7 @@ public sealed class ListTests
     [Fact]
     public void A_list_of_records_is_its_count_then_the_fields_of_each_record_in_order()
     {
-        Item[] items = [new("Milk", 2), new("Eggs", 12)];
+        OahuList<Item> items = [new("Milk", 2), new("Eggs", 12)];
 
         var writer = new OahuWriter();
         writer.WriteList(items, Item.Write);
@@ -154,7 +155,7 @@ public sealed class ListTests
             items[i] = i % 3 == 0;
 
         var writer = new OahuWriter();
-        writer.WriteList(items, WriteBoolItem);
+        writer.WriteList(items.ToOahuList(), WriteBoolItem);
 
         var expected = prefix + string.Concat(items.Select(item => item ? "01" : "00"));
         Assert.Equal(expected, Hex.Of(writer.WrittenSpan));
@@ -347,12 +348,11 @@ public sealed class ListTests
     }
 
     [Fact]
-    public void Writing_null_items_or_a_null_callback_is_an_argument_error_and_writes_nothing()
+    public void Writing_with_a_null_callback_is_an_argument_error_and_writes_nothing()
     {
         var writer = new OahuWriter();
         writer.WriteInt(5);
 
-        Assert.Throws<ArgumentNullException>(() => writer.WriteList<int>(null!, WriteIntItem));
         Assert.Throws<ArgumentNullException>(() => writer.WriteList([1, 2], null!));
         Assert.Equal("0a", Hex.Of(writer.WrittenSpan));
     }
@@ -413,21 +413,20 @@ public sealed class ListTests
     }
 
     [Fact]
-    public void An_empty_list_is_the_same_instance_every_time_and_allocates_nothing()
+    public void An_empty_list_is_the_empty_list_and_allocates_nothing()
     {
-        var input = Hex.Bytes("00" + "00");
+        var input = Hex.Bytes("00");
 
         var reader = new OahuReader(input);
-        var first = reader.ReadList(ReadStringItem);
-        var second = reader.ReadList(ReadStringItem);
+        var read = reader.ReadList(ReadStringItem);
         reader.EnsureEnd();
 
-        Assert.Empty(first);
-        Assert.Same(first, second);
+        Assert.True(read.IsEmpty);
+        Assert.Equal(OahuList<string>.Empty, read);
         Assert.Equal(0, Allocations.Smallest(() =>
         {
             var r = new OahuReader(input);
-            _sink = r.ReadList(ReadStringItem);
+            _strings = r.ReadList(ReadStringItem);
         }));
     }
 
@@ -441,7 +440,7 @@ public sealed class ListTests
         var read = Allocations.Smallest(() =>
         {
             var reader = new OahuReader(input);
-            _sink = reader.ReadList(ReadIntItem);
+            _ints = reader.ReadList(ReadIntItem);
         });
 
         Assert.True(arrayOnly > 0);
@@ -451,7 +450,7 @@ public sealed class ListTests
     [Fact]
     public void Writing_a_list_with_a_cached_delegate_allocates_nothing()
     {
-        int[] items = [1, -1, 300, int.MinValue];
+        OahuList<int> items = [1, -1, 300, int.MinValue];
         var writer = new OahuWriter();
 
         Assert.Equal(0, Allocations.Smallest(() =>
@@ -465,19 +464,19 @@ public sealed class ListTests
     public void Lists_of_many_lengths_round_trip()
     {
         var random = new Random(20_261_125);
-        var intLists = new List<int[]>();
-        var stringLists = new List<string[]>();
+        var intLists = new List<OahuList<int>>();
+        var stringLists = new List<OahuList<string>>();
         for (var i = 0; i < 300; i++)
         {
             var ints = new int[random.Next(0, i % 10 == 0 ? 400 : 20)];
             for (var j = 0; j < ints.Length; j++)
                 ints[j] = random.Next(int.MinValue, int.MaxValue);
-            intLists.Add(ints);
+            intLists.Add(ints.ToOahuList());
 
             var strings = new string[random.Next(0, 20)];
             for (var j = 0; j < strings.Length; j++)
                 strings[j] = new string((char)random.Next('a', 'z' + 1), random.Next(0, 200));
-            stringLists.Add(strings);
+            stringLists.Add(strings.ToOahuList());
         }
 
         var writer = new OahuWriter(1);
@@ -487,7 +486,7 @@ public sealed class ListTests
             writer.WriteList(stringLists[i], WriteStringItem);
         }
 
-        writer.WriteList(intLists, static (w, list) => w.WriteList(list, WriteIntItem));
+        writer.WriteList(intLists.ToOahuList(), static (w, list) => w.WriteList(list, WriteIntItem));
 
         var reader = new OahuReader(writer.WrittenSpan);
         for (var i = 0; i < intLists.Count; i++)
@@ -497,9 +496,7 @@ public sealed class ListTests
         }
 
         var nested = reader.ReadList(static (ref OahuReader r) => r.ReadList(ReadIntItem));
-        Assert.Equal(intLists.Count, nested.Count);
-        for (var i = 0; i < intLists.Count; i++)
-            Assert.Equal<int>(intLists[i], nested[i]);
+        Assert.Equal(intLists.ToOahuList(), nested);
         reader.EnsureEnd();
     }
 
@@ -510,7 +507,7 @@ public sealed class ListTests
         writer.WriteString("Milk");
         writer.WriteList([1, 2], WriteIntItem);
         writer.WriteBool(true);
-        writer.WriteList(Array.Empty<string>(), WriteStringItem);
+        writer.WriteList(OahuList<string>.Empty, WriteStringItem);
         writer.WritePresence(true);
         writer.WriteList(["a", "bc"], WriteStringItem);
         writer.WritePresence(false);
@@ -545,7 +542,7 @@ public sealed class ListTests
         var writer = new OahuWriter();
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            writer.WriteList(new int[count], static (_, _) => { }));
+            writer.WriteList(OahuList.Create(new int[count]), static (_, _) => { }));
 
         Assert.Equal(TooFewItemBytesMessage(count, 0), exception.Message);
     }
@@ -577,35 +574,23 @@ public sealed class ListTests
     public void An_empty_list_with_an_item_writer_that_writes_nothing_is_written()
     {
         var writer = new OahuWriter();
-        writer.WriteList(Array.Empty<int>(), static (_, _) => { });
+        writer.WriteList(OahuList<int>.Empty, static (_, _) => { });
 
         Assert.Equal("00", Hex.Of(writer.WrittenSpan));
     }
 
     [Fact]
-    public void A_List_of_T_is_written_like_an_array_and_allocates_nothing()
+    public void A_list_built_from_a_List_of_T_writes_what_the_list_held_when_it_was_built()
     {
-        List<int> items = [1, -1, 300];
+        List<int> source = [1, -1, 300];
+        var items = source.ToOahuList();
+        source.Add(4);
+        source[0] = 5;
+
         var writer = new OahuWriter();
         writer.WriteList(items, WriteIntItem);
 
         Assert.Equal("03" + "02" + "01" + "d804", Hex.Of(writer.WrittenSpan));
-        Assert.Equal(0, Allocations.Smallest(() =>
-        {
-            writer.Reset();
-            writer.WriteList(items, WriteIntItem);
-        }));
-    }
-
-    [Fact]
-    public void The_count_is_read_once_so_a_list_that_grows_while_it_is_written_writes_its_original_count()
-    {
-        var items = new GrowingList([1, 2]);
-        var writer = new OahuWriter();
-        writer.WriteList(items, WriteIntItem);
-
-        Assert.Equal("02" + "02" + "04", Hex.Of(writer.WrittenSpan));
-        Assert.Equal(4, items.Count);
     }
 
     [Fact]
@@ -660,7 +645,7 @@ public sealed class ListTests
     public void An_item_writer_of_an_inner_list_that_resets_the_writer_is_rejected()
     {
         var writer = new OahuWriter();
-        int[][] lists = [[1, 2], [3, 4, 5, 6, 7, 8, 9, 10]];
+        OahuList<OahuList<int>> lists = [[1, 2], [3, 4, 5, 6, 7, 8, 9, 10]];
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
             writer.WriteList(lists, static (w, list) => w.WriteList(list, static (inner, item) =>
@@ -741,25 +726,5 @@ public sealed class ListTests
             var quantity = reader.ReadInt();
             return new Item(name, quantity);
         }
-    }
-
-    // A list that adds an item each time one is read from it.
-    private sealed class GrowingList(List<int> items) : IReadOnlyList<int>
-    {
-        public int Count => items.Count;
-
-        public int this[int index]
-        {
-            get
-            {
-                var item = items[index];
-                items.Add(item * 10);
-                return item;
-            }
-        }
-
-        public IEnumerator<int> GetEnumerator() => items.GetEnumerator();
-
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

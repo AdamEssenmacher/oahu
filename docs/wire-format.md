@@ -213,7 +213,7 @@ Lists nest. An item can be any value: a list, a nullable value, a string and so 
 | A list of three lists of `int`s: empty, then 1, then 2 and 3 | `03 00 01 02 02 04 06` |
 | A list of nullable strings: absent, `x`, the empty string, absent | `04 00 01 01 78 01 00 00` |
 
-In C#, `OahuWriter.WriteList` and `OahuReader.ReadList` take a delegate that writes or reads one item. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `ReadList` returns an array of exactly the count's length and allocates nothing else, apart from what the delegate allocates for the items; an empty list is the same shared instance every time. `WriteList` reads the list's `Count` once. After the items, it throws `InvalidOperationException` if they wrote fewer bytes than there are items; it does not check each item on its own. It also throws `InvalidOperationException` if the delegate reset the writer. If the delegate throws, or `WriteList` does, the exception propagates. The writer's contents are then unspecified, so reset it before writing another message.
+In C#, a list is an `OahuList<T>`, the list type of a contract value, in the `AdamE.Oahu` namespace, as [Contracts](contracts.md#lists) says. `OahuWriter.WriteList` takes one and `OahuReader.ReadList` returns one. Both take a delegate that writes or reads one item. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `ReadList` returns a list over an array of exactly the count's length, which the list owns, so the array is not copied and nothing else can reach it. It allocates nothing else, apart from what the delegate allocates for the items, and an empty list allocates nothing. `WriteList` allocates nothing, and the list is immutable, so it cannot change while it is written. After the items, it throws `InvalidOperationException` if they wrote fewer bytes than there are items; it does not check each item on its own. It also throws `InvalidOperationException` if the delegate reset the writer. If the delegate throws, or `WriteList` does, the exception propagates. The writer's contents are then unspecified, so reset it before writing another message.
 
 ## Records
 
@@ -291,14 +291,14 @@ A reader rejects an index that is not below the number of the enum's declared va
 
 ## Unions
 
-A union is a value of one of a fixed set of records, its cases. This page writes `union Screen = Loading() | Failed(string Message) | Ready(Point Origin, IReadOnlyList<int> Values)` for this C# shape, an abstract record with its cases nested in it:
+A union is a value of one of a fixed set of records, its cases. This page writes `union Screen = Loading() | Failed(string Message) | Ready(Point Origin, OahuList<int> Values)` for this C# shape, an abstract record with its cases nested in it:
 
 ```csharp
 public abstract record Screen
 {
     public sealed record Loading() : Screen;
     public sealed record Failed(string Message) : Screen;
-    public sealed record Ready(Point Origin, IReadOnlyList<int> Values) : Screen;
+    public sealed record Ready(Point Origin, OahuList<int> Values) : Screen;
 }
 ```
 
@@ -310,7 +310,7 @@ For these types:
 
 ```text
 record Point(int X, int Y);
-union Screen = Loading() | Failed(string Message) | Ready(Point Origin, IReadOnlyList<int> Values);
+union Screen = Loading() | Failed(string Message) | Ready(Point Origin, OahuList<int> Values);
 union Wrapper = Only(int Value);
 ```
 
@@ -406,7 +406,7 @@ In C#, `OahuWriter.WriteBatch` and `OahuReader.ReadBatch` take a delegate that w
 
 ## Nesting depth
 
-A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, IReadOnlyList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
+A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, OahuList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
 
 A value's nesting depth is the number of record and union values that enclose it, counting itself if it is one. Records and unions count because they are the only kinds of value that can contain a value of their own type. Every record and union value counts, including a value of a record type that never contains itself. Lists, nullable values, enums, strings and primitive values do not add depth, and nor do a keyed list's batches and their operations.
 
@@ -418,9 +418,9 @@ For these types, in the notation of [Records](#records) and [Unions](#unions):
 
 ```text
 record Point(double X, double Y);
-record Node(string Name, Point Origin, IReadOnlyList<Node> Children);
-record Folder(IReadOnlyList<Node>? Nodes);
-union Shape = Circle(Point Center, double Radius) | Group(IReadOnlyList<Shape> Shapes);
+record Node(string Name, Point Origin, OahuList<Node> Children);
+record Folder(OahuList<Node>? Nodes);
+union Shape = Circle(Point Center, double Radius) | Group(OahuList<Shape> Shapes);
 ```
 
 | Value | Depth |

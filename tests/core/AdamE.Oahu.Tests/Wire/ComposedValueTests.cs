@@ -88,14 +88,14 @@ public sealed class ComposedValueTests
     [Fact]
     public void A_list_of_enums_is_its_count_then_each_index()
     {
-        Priority[] values = [Priority.Normal, Priority.High, Priority.Low, Priority.Normal];
+        OahuList<Priority> values = [Priority.Normal, Priority.High, Priority.Low, Priority.Normal];
         var writer = new OahuWriter();
         writer.WriteList(values, PriorityCodec.Write);
 
         Assert.Equal("04" + "02" + "00" + "01" + "02", Hex.Of(writer.WrittenSpan));
 
         var reader = new OahuReader(writer.WrittenSpan);
-        Assert.Equal<Priority>(values, reader.ReadList(PriorityCodec.Read));
+        Assert.Equal(values, reader.ReadList(PriorityCodec.Read));
         reader.EnsureEnd();
     }
 
@@ -121,6 +121,10 @@ public sealed class ComposedValueTests
         Assert.Null(read.Due);
         Assert.Equal(Priority.Normal, read.Priority);
         Assert.Equal<string>(["a", "bc"], read.Tags);
+
+        // The record read holds another list instance, and compares equal by the list's items.
+        Assert.Equal(item, read);
+        Assert.True(item == read);
     }
 
     [Theory]
@@ -245,7 +249,7 @@ public sealed class ComposedValueTests
         var read = Screen.Read(ref reader);
         reader.EnsureEnd();
 
-        AssertSameScreen(screen, read);
+        Assert.Equal(screen, read);
     }
 
     [Fact]
@@ -310,7 +314,7 @@ public sealed class ComposedValueTests
     [Fact]
     public void A_union_in_a_record_in_a_list_is_written_in_place_with_nothing_around_it()
     {
-        Panel[] panels =
+        OahuList<Panel> panels =
         [
             new("a", new Screen.Loading()),
             new("b", new Screen.Failed("x")),
@@ -327,12 +331,7 @@ public sealed class ComposedValueTests
         var read = reader.ReadList(Panel.Read);
         reader.EnsureEnd();
 
-        Assert.Equal(panels.Length, read.Count);
-        for (var i = 0; i < panels.Length; i++)
-        {
-            Assert.Equal(panels[i].Title, read[i].Title);
-            AssertSameScreen(panels[i].Screen, read[i].Screen);
-        }
+        Assert.Equal(panels, read);
     }
 
     [Fact]
@@ -387,7 +386,7 @@ public sealed class ComposedValueTests
 
         Assert.Equal(0, writer.WrittenCount);
 
-        Pair?[] pairs = [new Pair(new Empty(), new Empty()), null];
+        OahuList<Pair?> pairs = [new Pair(new Empty(), new Empty()), null];
         writer.WriteList(pairs, static (w, pair) =>
         {
             w.WritePresence(pair is not null);
@@ -429,7 +428,7 @@ public sealed class ComposedValueTests
     [Fact]
     public void A_list_of_cases_with_no_fields_is_its_count_then_each_index()
     {
-        Screen[] screens = [new Screen.Loading(), new Screen.Loading()];
+        OahuList<Screen> screens = [new Screen.Loading(), new Screen.Loading()];
         var writer = new OahuWriter();
         writer.WriteList(screens, Screen.Write);
 
@@ -516,26 +515,6 @@ public sealed class ComposedValueTests
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
     };
 
-    private static void AssertSameScreen(Screen expected, Screen actual)
-    {
-        switch (expected)
-        {
-            case Screen.Loading:
-                Assert.IsType<Screen.Loading>(actual);
-                break;
-            case Screen.Failed failed:
-                Assert.Equal(failed.Message, Assert.IsType<Screen.Failed>(actual).Message);
-                break;
-            case Screen.Ready ready:
-                var readReady = Assert.IsType<Screen.Ready>(actual);
-                Assert.Equal(ready.Origin, readReady.Origin);
-                Assert.Equal<int>(ready.Values, readReady.Values);
-                break;
-            default:
-                throw new UnreachableException();
-        }
-    }
-
     // enum Priority { High = 10, Low = 5, Normal = 7 }: declared in that order, so its indexes are 0, 1 and 2.
     public enum Priority
     {
@@ -569,7 +548,7 @@ public sealed class ComposedValueTests
     }
 
     // record Item(string Name, int Quantity, bool Done, double Weight, DateTimeOffset? Due, Priority Priority,
-    // IReadOnlyList<string> Tags), with the codec a generator writes for it.
+    // OahuList<string> Tags), with the codec a generator writes for it.
     private sealed record Item(
         string Name,
         int Quantity,
@@ -577,7 +556,7 @@ public sealed class ComposedValueTests
         double Weight,
         DateTimeOffset? Due,
         Priority Priority,
-        IReadOnlyList<string> Tags)
+        OahuList<string> Tags)
     {
         public static void Write(OahuWriter writer, Item item)
         {
@@ -775,7 +754,7 @@ public sealed class ComposedValueTests
         }
     }
 
-    // union Screen = Loading() | Failed(string Message) | Ready(Point Origin, IReadOnlyList<int> Values), with the
+    // union Screen = Loading() | Failed(string Message) | Ready(Point Origin, OahuList<int> Values), with the
     // codec a generator writes for it: it enters once for the union value and its case, writes the case's index, then
     // the case's fields.
     private abstract record Screen
@@ -824,7 +803,7 @@ public sealed class ComposedValueTests
 
         public sealed record Failed(string Message) : Screen;
 
-        public sealed record Ready(Point Origin, IReadOnlyList<int> Values) : Screen;
+        public sealed record Ready(Point Origin, OahuList<int> Values) : Screen;
     }
 
     // record Panel(string Title, Screen Screen).
