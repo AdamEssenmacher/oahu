@@ -6,6 +6,10 @@ Oahu keeps an app's view models in C# and its screens native, in SwiftUI and Jet
 
 > **Status: under construction.** Nothing is published yet. Packages will ship to NuGet.org as `AdamE.Oahu.*`.
 
+## Documentation
+
+See the [documentation](https://github.com/AdamEssenmacher/oahu/blob/main/docs/index.md).
+
 ## License
 
 [MIT](https://github.com/AdamEssenmacher/oahu/blob/main/LICENSE)
