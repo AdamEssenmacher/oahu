@@ -246,7 +246,7 @@ A method returns nothing to the screen. The screen calls it and goes on, and no 
 
 A method returns `void` or `Task`.
 
-- **`void`**: the method's work is over when it returns.
+- **`void`**: the method's work is over when it returns. So a view model does not implement a `void` method as `async void`. Such a method's work goes on after the call has returned, and an exception it throws after its first `await` is not a failure Oahu sees: it reaches the UI thread unhandled, where it usually ends the app. A method that awaits is declared `Task`. The analyzer will report an `async void` implementation of a contract's method; nothing does yet.
 - **`Task`**: the method may `await`. Its work goes on after the native call has returned, and ends when the `Task` completes.
 
 The screen calls both the same way, and gets nothing back from either. For the view model, the difference is what reaches the screen before the call returns. Everything a method changes before it returns to its caller reaches the screen before the outermost native call returns, as the [architecture](architecture.md#the-path-of-one-change) says. For an `async` method, that is everything up to its first `await` of something not already complete, where it returns its `Task`. What it changes after that reaches the screen in later delivery turns, like any change. While the method waits at an `await`, delivery turns run as usual, so the screen can show a state that says the work is under way.
@@ -300,7 +300,7 @@ The analyzer, which comes in a later milestone, will enforce these rules: those 
 
 A method that throws, or whose `Task` fails or is cancelled, is a **failure**, as the [architecture](architecture.md#other-operations) says. It is reported to the host, and the app continues.
 
-- **A cancellation after the close is not reported.** Once the screen's token is cancelled, because the screen that made the call closed, an `OperationCanceledException` from a method that takes the token is expected and is not reported, whether the method throws it or its `Task` ends cancelled, and whichever token the exception carries. A method that takes no token reports every cancellation, before the close or after it.
+- **A cancellation after the close is not reported.** Once the screen's token is cancelled, because the screen that made the call closed, an `OperationCanceledException` from a method that takes the token is expected and is not reported, whether the method throws it or its `Task` ends cancelled, and whichever token the exception carries. A method that takes no token reports every cancellation, before the close or after it. This is decided when Oahu observes that the method has ended, on the UI thread, by looking at the screen's token then: Oahu does not ask what cancelled the method or when. So a `Task` cancelled by a timeout of its own shortly before the close, and observed after it, is not reported either.
 - **Any other failure after the close is reported.** A method that throws something else, or whose `Task` fails, is a failure whether or not its screen has closed.
 - **A null `Task` is a fault.** A `Task` method that returns null instead of a `Task` breaks a rule of the seam, so it is a [fault](architecture.md#other-operations), not a failure, and the app ends.
 - **Code after an `await` may run after the close.** The rest of the method, its `catch` and its `finally` run when what it awaits completes: possibly after the screen has closed, and after the host has disposed what it owns for the view model. So that code must not rely on them still being there: check the token, or a flag of the view model's own, first.
@@ -309,7 +309,7 @@ Nothing about a failure is returned to the screen. A failure is for what the vie
 
 ### Threading and re-entrancy
 
-A method is called on the UI thread, like everything on the seam, as the [architecture](architecture.md#invariants) says. A change it makes to a source must be made on the UI thread too, after an `await` as before one. Where the code after an `await` resumes is specified with the loop. A method's code that continues off the UI thread, as it does after `ConfigureAwait(false)`, must not change a source there: that is a fault.
+A method is called on the UI thread, like everything on the seam, as the [architecture](architecture.md#invariants) says. A change it makes to a source must be made on the UI thread too, after an `await` as before one. Where the code after an `await` resumes is specified with the loop. A method's code that continues off the UI thread, as it may after `ConfigureAwait(false)`, must not change a source there: that is a fault.
 
 A call the screen makes while it is receiving a message is not outermost. What it changes is delivered later in the delivery turn already running, not before the call returns, as the [architecture](architecture.md#the-path-of-one-change) says.
 
