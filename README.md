@@ -8,4 +8,4 @@ Oahu keeps an app's view models in C# and its screens native, in SwiftUI and Jet
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/AdamEssenmacher/oahu/blob/main/LICENSE)

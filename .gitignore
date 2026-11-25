@@ -15,3 +15,9 @@ TestResults/
 
 # macOS
 .DS_Store
+
+# Files that can hold secrets
+.env
+*.binlog
+*.pfx
+*.publishsettings
