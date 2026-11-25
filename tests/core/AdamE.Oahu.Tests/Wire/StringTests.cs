@@ -6,6 +6,9 @@ namespace AdamE.Oahu.Tests.Wire;
 
 public sealed class StringTests
 {
+    // Keeps each string built or read in the allocation tests reachable, so that the runtime cannot drop it.
+    private static string? _sink;
+
     [Theory]
     [InlineData("", "00")]
     [InlineData("Milk", "044d696c6b")]
@@ -547,6 +550,87 @@ public sealed class StringTests
         {
             var reader = new OahuReader(input);
             Assert.Same(string.Empty, reader.ReadString());
+        }
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("hello, world")]
+    [InlineData("café crème")]
+    [InlineData("€ and 東京")]
+    [InlineData("😀 and 🎉")]
+    [InlineData("\0\uFEFF\uFFFD")]
+    public void Reading_a_string_allocates_only_the_string(string value)
+    {
+        var writer = new OahuWriter();
+        writer.WriteString(value);
+        var input = writer.WrittenSpan.ToArray();
+
+        // The same string built from its characters, so the expected size is the runtime's own.
+        var expected = Allocations.Smallest(() => _sink = new string(value.AsSpan()));
+        var allocated = Allocations.Smallest(() => _sink = new OahuReader(input).ReadString());
+
+        Assert.Equal(value, _sink);
+        Assert.True(expected > 0);
+        Assert.Equal(expected, allocated);
+    }
+
+    [Theory]
+    [InlineData(127, "c0af", false)]
+    [InlineData(1_000, "eda080", false)]
+    [InlineData(4_096, "f4908080", false)]
+    [InlineData(4_096, "80", false)]
+    [InlineData(4_096, "c328", false)]
+    [InlineData(65_536, "ff", false)]
+    [InlineData(4_096, "e282", true)]
+    [InlineData(65_536, "f09f98", true)]
+    public void Ill_formed_UTF8_deep_in_a_long_string_names_its_offset_and_does_not_move_the_reader(
+        int prefixBytes, string bad, bool truncated)
+    {
+        // Well-formed text of every sequence length before the bad bytes, and more after them unless they are cut
+        // short by the end of the string.
+        var prefix = Encoding.UTF8.GetBytes(LongText(prefixBytes));
+        byte[] tail = truncated ? [] : Encoding.UTF8.GetBytes(LongText(100));
+        byte[] body = [.. prefix, .. Hex.Bytes(bad), .. tail];
+
+        var writer = new OahuWriter();
+        writer.WriteBool(true);
+        writer.WriteCount(body.Length);
+        byte[] input = [.. writer.WrittenSpan, .. body, 0];
+        var bytesStart = input.Length - 1 - body.Length;
+
+        var reader = new OahuReader(input);
+        Assert.True(reader.ReadBool());
+
+        OahuFormatException? exception = null;
+        try
+        {
+            reader.ReadString();
+        }
+        catch (OahuFormatException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.NotNull(exception);
+        Assert.Equal(1, exception.Offset);
+        Assert.Equal(IllFormedMessage(1, bytesStart + prefix.Length, truncated), exception.Message);
+        Assert.Equal(input.Length - 1, reader.Remaining);
+
+        static string LongText(int bytes)
+        {
+            // The chunk is 15 bytes of UTF-8 and an 'x' is 1, so the byte count is tracked, not measured again.
+            const string chunk = "ab é € 😀 ";
+            const int chunkBytes = 15;
+            var text = new StringBuilder();
+            var written = 0;
+            for (; written + chunkBytes <= bytes; written += chunkBytes)
+                text.Append(chunk);
+            text.Append('x', bytes - written);
+
+            var result = text.ToString();
+            Assert.Equal(bytes, Encoding.UTF8.GetByteCount(result));
+            return result;
         }
     }
 

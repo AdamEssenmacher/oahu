@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
-using System.Text.Unicode;
 
 namespace AdamE.Oahu.Wire;
 
@@ -24,6 +23,11 @@ public ref struct OahuReader
     // DateTimeOffset.MinValue and MaxValue, in whole milliseconds since the Unix epoch.
     private const long MinInstantMilliseconds = -62_135_596_800_000;
     private const long MaxInstantMilliseconds = 253_402_300_799_999;
+
+    // Checks a string's bytes as it decodes them, so they are not scanned once more beforehand, and throws instead of
+    // writing U+FFFD. On a throw, ReadString finds the first ill-formed sequence again to name it in its error.
+    private static readonly UTF8Encoding StrictUtf8 =
+        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly ReadOnlySpan<byte> _input;
     private int _offset;
@@ -309,14 +313,19 @@ public ref struct OahuReader
         }
 
         var bytes = _input.Slice(bytesStart, length);
-        if (!Utf8.IsValid(bytes))
+        string value;
+        try
+        {
+            value = StrictUtf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
         {
             _offset = start;
             throw IllFormedUtf8(start, bytesStart, bytes);
         }
 
         _offset = bytesStart + length;
-        return Encoding.UTF8.GetString(bytes);
+        return value;
     }
 
     /// <summary>
