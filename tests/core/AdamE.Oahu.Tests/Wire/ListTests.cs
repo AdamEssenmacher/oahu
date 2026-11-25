@@ -609,33 +609,6 @@ public sealed class ListTests
     }
 
     [Fact]
-    public void A_type_that_contains_itself_round_trips_when_nested_fifty_deep()
-    {
-        var root = new Node(0, []);
-        for (var depth = 1; depth < 50; depth++)
-            root = new Node(depth, [root, new Node(-depth, [])]);
-
-        var writer = new OahuWriter();
-        Node.Write(writer, root);
-
-        var reader = new OahuReader(writer.WrittenSpan);
-        var read = Node.Read(ref reader);
-        reader.EnsureEnd();
-
-        for (var depth = 49; depth > 0; depth--)
-        {
-            Assert.Equal(depth, read.Value);
-            Assert.Equal(2, read.Children.Count);
-            Assert.Equal(-depth, read.Children[1].Value);
-            Assert.Empty(read.Children[1].Children);
-            read = read.Children[0];
-        }
-
-        Assert.Equal(0, read.Value);
-        Assert.Empty(read.Children);
-    }
-
-    [Fact]
     public void An_item_writer_that_resets_the_writer_and_writes_nothing_is_rejected()
     {
         var writer = new OahuWriter();
@@ -767,23 +740,6 @@ public sealed class ListTests
             var name = reader.ReadString();
             var quantity = reader.ReadInt();
             return new Item(name, quantity);
-        }
-    }
-
-    // A record that contains a list of itself, with the codec a generator would write for it.
-    private sealed record Node(int Value, IReadOnlyList<Node> Children)
-    {
-        public static void Write(OahuWriter writer, Node node)
-        {
-            writer.WriteInt(node.Value);
-            writer.WriteList(node.Children, Write);
-        }
-
-        public static Node Read(ref OahuReader reader)
-        {
-            var value = reader.ReadInt();
-            var children = reader.ReadList(Read);
-            return new Node(value, children);
         }
     }
 

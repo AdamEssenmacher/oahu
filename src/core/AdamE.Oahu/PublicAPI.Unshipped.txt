@@ -1,8 +1,11 @@
 #nullable enable
+AdamE.Oahu.Wire.OahuFormat
 AdamE.Oahu.Wire.OahuFormatException
 AdamE.Oahu.Wire.OahuFormatException.Offset.get -> int
 AdamE.Oahu.Wire.OahuReader
 AdamE.Oahu.Wire.OahuReader.EnsureEnd() -> void
+AdamE.Oahu.Wire.OahuReader.EnterNested() -> void
+AdamE.Oahu.Wire.OahuReader.ExitNested() -> void
 AdamE.Oahu.Wire.OahuReader.OahuReader() -> void
 AdamE.Oahu.Wire.OahuReader.OahuReader(System.ReadOnlySpan<byte> input) -> void
 AdamE.Oahu.Wire.OahuReader.ReadBool() -> bool
@@ -21,6 +24,8 @@ AdamE.Oahu.Wire.OahuReadFunc<T>
 AdamE.Oahu.Wire.OahuWriter
 AdamE.Oahu.Wire.OahuWriter.OahuWriter() -> void
 AdamE.Oahu.Wire.OahuWriter.OahuWriter(int initialCapacity) -> void
+AdamE.Oahu.Wire.OahuWriter.EnterNested() -> void
+AdamE.Oahu.Wire.OahuWriter.ExitNested() -> void
 AdamE.Oahu.Wire.OahuWriter.Reset() -> void
 AdamE.Oahu.Wire.OahuWriter.WriteBool(bool value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteCount(int count) -> void
@@ -35,4 +40,5 @@ AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
 AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
 AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>
+const AdamE.Oahu.Wire.OahuFormat.MaxNestingDepth = 64 -> int
 virtual AdamE.Oahu.Wire.OahuReadFunc<T>.Invoke(ref AdamE.Oahu.Wire.OahuReader reader) -> T
