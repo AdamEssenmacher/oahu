@@ -1,1 +1,18 @@
 #nullable enable
+AdamE.Oahu.Wire.OahuFormatException
+AdamE.Oahu.Wire.OahuFormatException.Offset.get -> int
+AdamE.Oahu.Wire.OahuReader
+AdamE.Oahu.Wire.OahuReader.EnsureEnd() -> void
+AdamE.Oahu.Wire.OahuReader.OahuReader() -> void
+AdamE.Oahu.Wire.OahuReader.OahuReader(System.ReadOnlySpan<byte> input) -> void
+AdamE.Oahu.Wire.OahuReader.ReadCount() -> int
+AdamE.Oahu.Wire.OahuReader.ReadVarUInt() -> ulong
+AdamE.Oahu.Wire.OahuReader.Remaining.get -> int
+AdamE.Oahu.Wire.OahuWriter
+AdamE.Oahu.Wire.OahuWriter.OahuWriter() -> void
+AdamE.Oahu.Wire.OahuWriter.OahuWriter(int initialCapacity) -> void
+AdamE.Oahu.Wire.OahuWriter.Reset() -> void
+AdamE.Oahu.Wire.OahuWriter.WriteCount(int count) -> void
+AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
+AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
+AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>

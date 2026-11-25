@@ -4,9 +4,9 @@
 
 ## How it was verified
 
-<!-- Commands run, platforms checked, tests added. -->
+<!-- Tests added, commands run, platforms checked. -->
 
 ## Checklist
 
-- [ ] One discrete change, with its documentation
+- [ ] One discrete change, with its tests and documentation
 - [ ] Discussed in an issue first, unless it is a small fix
