@@ -125,7 +125,7 @@ internal sealed partial class VectorFile
         return new VectorRefusal(code, String(entry, "rule", code));
     }
 
-    private static Dictionary<string, VectorType> ParseTypes(JsonArray entries)
+    public static Dictionary<string, VectorType> ParseTypes(JsonArray entries)
     {
         // Two passes, so that a type can refer to itself and to types declared after it.
         var types = new Dictionary<string, VectorType>(StringComparer.Ordinal);
@@ -178,13 +178,9 @@ internal sealed partial class VectorFile
             }
         }
 
+        VectorTypeParser.CheckRecordCycles(types.Values);
         foreach (var type in types.Values)
-        {
-            if (type is RecordType record)
-                VectorTypeParser.IsNoBytes(record);
-
             VectorTypeParser.CheckListItems(type);
-        }
 
         return types;
     }

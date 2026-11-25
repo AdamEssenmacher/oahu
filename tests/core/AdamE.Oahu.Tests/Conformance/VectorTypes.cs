@@ -74,8 +74,9 @@ internal sealed class UnionType(string name) : VectorType
 /// single = "list&lt;" type "&gt;" | primitive | declared
 /// </code>
 /// No whitespace is allowed. <c>varuint</c> and <c>count</c> are allowed only as a vector's whole type. Once every
-/// declared type has its fields, <see cref="CheckListItems"/> rejects a list whose item type is a record that is no
-/// bytes, because the format gives such a list no bytes.
+/// declared type has its fields, <see cref="CheckRecordCycles"/> rejects a record that contains itself through record
+/// fields alone, which has no value that ends, and then <see cref="CheckListItems"/> rejects a list whose item type is
+/// a record that is no bytes, which the format gives no bytes.
 /// </remarks>
 internal static class VectorTypeParser
 {
@@ -179,19 +180,49 @@ internal static class VectorTypeParser
         }
     }
 
-    // A record is no bytes when all its fields are records that are no bytes. The contract rules forbid a cycle made
-    // only of record fields, and so does the vector file: such a type has no value that ends.
-    public static bool IsNoBytes(RecordType record) => IsNoBytes(record, []);
-
-    private static bool IsNoBytes(RecordType record, HashSet<RecordType> enclosing)
+    /// <summary>
+    /// Rejects a record that contains itself through record fields alone: a field whose type is the record itself,
+    /// or a record whose fields lead back to it through other records' fields. A field reached through a list, a
+    /// nullable value or a union does not make such a cycle, as the page's Records section says.
+    /// </summary>
+    public static void CheckRecordCycles(IEnumerable<VectorType> types)
     {
-        if (!enclosing.Add(record))
-            throw new InvalidDataException($"The record {record.Text} contains itself through record fields alone.");
-
-        var noBytes = record.Fields.All(field => field.Type is RecordType inner && IsNoBytes(inner, enclosing));
-        enclosing.Remove(record);
-        return noBytes;
+        var done = new HashSet<RecordType>();
+        foreach (var record in types.OfType<RecordType>())
+            CheckRecordCycles(record, [], done);
     }
+
+    private static void CheckRecordCycles(
+        RecordType record, List<(RecordType Record, VectorField Field)> path, HashSet<RecordType> done)
+    {
+        if (done.Contains(record))
+            return;
+
+        var start = path.FindIndex(step => step.Record == record);
+        if (start >= 0)
+        {
+            var steps = path.Skip(start).Select(step => $"{step.Record.Text}.{step.Field.Name} is {step.Field.Type.Text}");
+            throw new InvalidDataException(
+                $"The record {record.Text} contains itself through record fields alone: {string.Join(", ", steps)}.");
+        }
+
+        foreach (var field in record.Fields)
+        {
+            if (field.Type is not RecordType inner)
+                continue;
+
+            path.Add((record, field));
+            CheckRecordCycles(inner, path, done);
+            path.RemoveAt(path.Count - 1);
+        }
+
+        done.Add(record);
+    }
+
+    // A record is no bytes when all its fields are records that are no bytes. CheckRecordCycles has already rejected
+    // a cycle made only of record fields, which the contract rules forbid, so this ends.
+    public static bool IsNoBytes(RecordType record) =>
+        record.Fields.All(field => field.Type is RecordType inner && IsNoBytes(inner));
 
     private static void Expect(string text, ref int position, char expected)
     {

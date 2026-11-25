@@ -125,7 +125,7 @@ A change to the wire format changes the page, this file and the code together, i
 - The `reasons` are the page's Malformed input list, word for word and in order, and the harness knows each code and its kind. Every cause and every refusal is used by a vector, and no vector uses a via code.
 - Every `refusals` rule is quoted from the page.
 - The harness knows each of the page's `##` sections and which vector sections belong to it. Vector names are unique, and grouped by section in the order of the page's `##` headings, so moving or renaming a section on the page fails a test.
-- Every row of each table on the page with a Bytes column has exactly one vector whose `doc` names it, and no `doc` names anything else. Where the row lists its bytes, or says it is no bytes, the vector has exactly those bytes. A number in the row's Value, Milliseconds or Ticks column is the vector's value; a Zigzag value is the zigzag encoding of the vector's value and the value of its bytes; an instant in the Instant column is the vector's milliseconds. A table with a Bytes column that has a column the harness does not know fails a test.
+- Every row of each table on the page with a Bytes column has exactly one vector whose `doc` names it, and no `doc` names anything else. Where the row lists its bytes, or says it is no bytes, the vector has exactly those bytes. The harness names the few rows that describe their bytes in words; any other row must list its bytes or say it is no bytes, so a mistyped byte fails a test, and so does a named row the page no longer has. A number in the row's Value, Milliseconds or Ticks column is the vector's value; a Zigzag value is the zigzag encoding of the vector's value and the value of its bytes; an instant in the Instant column is the vector's milliseconds. A table with a Bytes column that has a column the harness does not know fails a test.
 - Every declared type is used by a vector.
 - The file is in its layout, one entry per line, and the depth vectors are the generated ones.
 
@@ -133,7 +133,7 @@ These are not checked by machine, and a reviewer reads them:
 
 - Deleting a hand-written vector that no `doc` names. Nothing notices it is gone.
 - The page's depth table, which has no Bytes column. The depth vectors follow it, but nothing compares them with it.
-- The bytes of a row that describes them in words, such as "`80 01`, then 128 bytes of `61`". Its vector is matched to the row by `doc` only.
+- The bytes of a row that the harness names as describing them in words, such as "`80 01`, then 128 bytes of `61`". Its vector is matched to the row by `doc` only.
 - A Duration cell, which is words, such as "One day".
 - The order of vectors within a section.
 - The page's prose, apart from the Malformed input list and the quoted refusals. A rule stated only in prose has a vector only if someone wrote one.

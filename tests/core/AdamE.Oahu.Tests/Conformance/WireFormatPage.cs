@@ -10,7 +10,7 @@ internal sealed record PageTableRow(string Section, IReadOnlyList<string> Header
 internal sealed class WireFormatPage
 {
     private static readonly Lazy<WireFormatPage> LazyCurrent =
-        new(() => new WireFormatPage(File.ReadAllText(Repository.WireFormatPage)));
+        new(() => Parse(File.ReadAllText(Repository.WireFormatPage)));
 
     private WireFormatPage(string text)
     {
@@ -22,9 +22,29 @@ internal sealed class WireFormatPage
         var malformed = new List<string>();
         var rows = new List<PageTableRow>();
         IReadOnlyList<string>? header = null;
+        string? fence = null;
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i];
+
+            // A fenced code block's lines are code, not tables, sections or bullets. It ends at a line of at least as
+            // many of its own fence characters.
+            var trimmed = line.TrimStart(' ');
+            if (fence is not null)
+            {
+                if (trimmed.StartsWith(fence, StringComparison.Ordinal) && trimmed.TrimEnd().All(c => c == fence[0]))
+                    fence = null;
+                continue;
+            }
+
+            if (line.Length - trimmed.Length < 4 && (trimmed.StartsWith("```", StringComparison.Ordinal) ||
+                trimmed.StartsWith("~~~", StringComparison.Ordinal)))
+            {
+                fence = new string(trimmed[0], trimmed.TakeWhile(c => c == trimmed[0]).Count());
+                header = null;
+                continue;
+            }
+
             if (line.StartsWith("## ", StringComparison.Ordinal))
             {
                 section = line[3..];
@@ -58,6 +78,8 @@ internal sealed class WireFormatPage
     }
 
     public static WireFormatPage Current => LazyCurrent.Value;
+
+    public static WireFormatPage Parse(string text) => new(text);
 
     public string Text { get; }
 

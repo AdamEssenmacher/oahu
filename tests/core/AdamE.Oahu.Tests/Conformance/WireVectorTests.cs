@@ -73,6 +73,17 @@ public sealed partial class WireVectorTests
     private static readonly HashSet<string> ByteTableColumns =
         new(["Value", "Zigzag value", "Instant", "Milliseconds", "Duration", "Ticks", "Bytes"], StringComparer.Ordinal);
 
+    // The rows of the page's byte tables whose Bytes cell describes the bytes in words, by their keys. Every other row
+    // lists its bytes or says it is no bytes, and its vector must have exactly those bytes.
+    private static readonly HashSet<string> RowsWithBytesInWords = new(
+        [
+            "Strings: 128 `a` characters",
+            "Strings: 64 `é` characters",
+            "Lists: 128 booleans",
+            "Enums: `High`, read from a longer form of index 0",
+        ],
+        StringComparer.Ordinal);
+
     public static IEnumerable<TheoryDataRow<string>> VectorNames =>
         VectorFile.Current.Vectors.Select(v => new TheoryDataRow<string>(v.Name) { TestDisplayName = v.Name });
 
@@ -223,16 +234,29 @@ public sealed partial class WireVectorTests
             rows.Select(r => r.Key).Order(StringComparer.Ordinal),
             documented.Select(v => v.Doc!).Order(StringComparer.Ordinal));
 
-        var checkedBytes = 0;
+        var missing = RowsWithBytesInWords.Except(rows.Select(r => r.Key), StringComparer.Ordinal).ToList();
+        Assert.True(
+            missing.Count == 0,
+            "The harness lists rows whose bytes are in words that the page does not have: " + string.Join(" | ", missing));
+
         foreach (var row in rows)
         {
             var vector = documented.Single(v => v.Doc == row.Key);
             var bytes = row.Cells[row.Header.ToList().IndexOf("Bytes")];
-            if (bytes == "No bytes" || LiteralBytes().IsMatch(bytes))
+            if (RowsWithBytesInWords.Contains(row.Key))
             {
+                Assert.False(
+                    bytes == "No bytes" || LiteralBytes().IsMatch(bytes),
+                    $"The page's row {row.Key} lists its bytes, but the harness lists it as one whose bytes are in words.");
+            }
+            else
+            {
+                Assert.True(
+                    bytes == "No bytes" || LiteralBytes().IsMatch(bytes),
+                    $"The page's row {row.Key} has the bytes {bytes}, which are neither literal bytes, such as `80 01`, " +
+                    "nor No bytes. If the row describes its bytes in words, add it to RowsWithBytesInWords.");
                 var hex = bytes == "No bytes" ? "" : bytes.Replace("`", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal);
                 Assert.True(hex == vector.Hex, $"{vector.Name} has the bytes {vector.Hex}; the page's row {row.Key} has {hex}.");
-                checkedBytes++;
             }
 
             var unknown = row.Header.Where(column => !ByteTableColumns.Contains(column)).ToList();
@@ -280,10 +304,6 @@ public sealed partial class WireVectorTests
                     $"The page's row {row.Key} is the instant {text}; {vector.Name} has {milliseconds} milliseconds.");
             }
         }
-
-        // Rows whose bytes are described rather than listed, such as "80 01, then 128 bytes of 61", are only matched
-        // by their first cell.
-        Assert.True(checkedBytes >= rows.Count - 4, $"Only {checkedBytes} of {rows.Count} rows had their bytes checked.");
     }
 
     [Fact]
