@@ -28,7 +28,7 @@ A contract has **streams**, which carry values from the view model to the screen
 
 A member is a **method**, returning `void` or `Task` and taking at most one value, or an **edit** to an editable. A `Task` method may also take a trailing `CancellationToken`. Members return nothing to the screen. A screen learns the result of a call the way it learns everything else: from the streams.
 
-The values in a contract are immutable: numbers, strings, instants, durations, enums, records, unions of records, nullable values and lists of these. They compare by structure.
+The values in a contract are immutable: booleans, numbers, strings, instants, durations, enums, records, unions of records, nullable values and lists of these. They compare by structure.
 
 The **view model** is an ordinary C# class that implements the contract. It knows nothing about its screen (it cannot tell whether one is attached, visible or covered) and it runs in a plain unit test with no device.
 
@@ -60,7 +60,7 @@ flowchart LR
 ```
 
 1. **Set.** A view model holds a **source** for each stream (`StateSource<T>`, `EditableSource<T>`, `EventSource<T>`, `KeyedListSource<T>`) and changes it. The source's current value changes at once. Setting a state or an editable to its current value publishes nothing. A state can also be **derived** from other sources, and then follows them.
-2. **Deliver.** The **loop** (`OahuLoop`) notifies observers in a later **turn** of the UI thread, meaning a later pass of its run loop, so a view model can change several sources and the screen sees them together. Several changes to one state within a turn arrive as one. Events are never merged. Sources deliver in the order they first changed.
+2. **Deliver.** The **loop** (`OahuLoop`) notifies observers in a later **turn** of the UI thread, meaning a later pass of its run loop, so a view model can change several sources and the screen sees them together. Several changes to one state within a turn arrive as one. Events are never merged. Sources deliver in the order they first changed in that turn.
 3. **Encode.** The exporter writes the value in the **wire format** and hands the bytes to the **port**, the C# object the native side holds.
 4. **Cross.** The port passes the stream's number, a pointer and a length to the screen's native **sink**. Each screen has one sink for all its streams. The bytes are valid only during the call. Nothing is retained and nothing is marshalled per field.
 5. **Apply.** The native **connection** decodes the whole message first and applies it to the model only if it decoded completely, so a bad message changes nothing. The toolkit's own observation then redraws the screen.
@@ -74,7 +74,7 @@ When a screen subscribes, the current value of each state and editable, and the 
 - **Edits.** When the screen edits an editable, the view model may accept the value, change it or refuse it. Whatever it settles on reaches the screen before the outermost edit call returns. An edit that has not settled by then is a fault.
 - **Showing a screen.** A host shows a screen in one of two ways. As a **container**, it gets a platform view controller that holds the screen. As a **mount**, the view model is connected and registered under an ID, and the app's own native view hierarchy places it. A mounted screen is an ordinary view in that hierarchy, so native navigation, transitions and environment values work between Oahu screens as they do between any two views. Oahu has no navigation layer of its own.
 - **Teardown.** Closing a screen ends the native side first, then the exporter, then whatever the host owns for the view model. A `Task` method still running sees its cancellation token cancelled. Failures during teardown are collected and reported together; one failure does not stop the rest. A screen closed from inside a native call is torn down in the next turn.
-- **Failures and faults.** A method that throws, or whose `Task` fails or is cancelled, is a **failure**: it is reported to the host, and the app continues. A broken rule of the seam is a **fault**, such as a change made off the UI thread, bytes that do not decode, or an exception from an observer. Every runtime treats a fault the same way: it never unwinds across the bridge, it is never swallowed, and the app ends at the earliest point where no frames of the other side are on the stack. In C# and Kotlin, where a fault is an exception, that is the next turn of the UI thread, after the host has reported it. In Swift, which stops without unwinding, it is the point of detection.
+- **Failures and faults.** A method that throws, or whose `Task` fails or is cancelled, is a **failure**: it is reported to the host, and the app continues. The one exception is a cancellation that follows the screen's own close, which is expected and is not reported. A broken rule of the seam is a **fault**, such as a change made off the UI thread, bytes that do not decode, or an exception from an observer. Two rules hold in every runtime: a fault never unwinds across the bridge, and it is never swallowed, so the app ends. When the app ends depends on how the language stops. In C# and Kotlin a fault is an exception, which must not cross native frames: the runtime catches it, the host reports it, and the app ends on the next turn of the UI thread. In Swift a fault stops the process where it is detected, without unwinding. A Swift fault can be detected inside a call from C#, as when a message does not decode, and then the host does not get to report it.
 
 ## The wire format and the fixed interface
 
@@ -112,10 +112,10 @@ The layers, in the order they are built. Each builds on those above it. The road
 | Exporter | C# | Subscription and replay, forwarding, member dispatch, the drain before a native call returns, edit settlement, failures and faults |
 | Contract model | C# | The model of a contract read from C# symbols, the canonical signature and the contract hash |
 | Analyzer and C# generator | C# | Diagnostics for contracts that cannot cross the seam; the generated exporter and its registration |
-| Hosting | C# | The public surface a platform host builds on, in `AdamE.Oahu.Hosting`: connecting a view model to a native screen, the contract check, containers and mounts, the teardown order, failure and fault reporting |
+| Hosting | C# | The public surface a platform host builds on, in the `AdamE.Oahu.Hosting` namespace of the core package: connecting a view model to a native screen, the contract check, containers and mounts, the teardown order, failure and fault reporting |
 | Swift runtime | Swift | The Swift reader and writer, the fixed interface, the connection, events, keyed lists, the SwiftUI container and mount view, the preview port |
 | Swift emitter | C# | The generated Swift model, codecs and screen provider for each contract |
-| Build integration | C#, MSBuild | The generator, with one command line that writes its output or checks that it is current, and the build targets that run it and package the app's native library with each build |
+| Build integration | C#, MSBuild | The native code generator, with one command line that writes its output or checks that it is current, and the build targets that run it and package the app's native library with each build |
 | iOS host | C# | The binding of the fixed interface, the port, screen lookup, and showing a screen or a mount in a .NET iOS app |
 | Property-change adapter | C# | Sources over an existing `INotifyPropertyChanged` view model, its commands and its collections, and the public seam that adapters build on |
 
@@ -123,7 +123,7 @@ The first pass is for iOS 17 and later, and for iOS alone: the iOS host and the 
 
 Three properties hold across the layers:
 
-- **The C# layers above the Swift runtime need no device.** They target `net11.0`, are trim- and AOT-compatible, and are tested in plain unit tests, with a test loop standing in for the UI thread.
+- **The C# layers need no device, apart from the iOS host.** The layers that run inside an app (the wire format, vocabulary, loop and sources, exporter, hosting and the property-change adapter) target `net11.0`, are trim- and AOT-compatible, and are tested in plain unit tests, with a test loop standing in for the UI thread. The contract model, the analyzer and the C# generator run inside the compiler and target `netstandard2.0`, as the compiler requires. The Swift emitter and the build integration run on the build machine.
 - **Most of the Swift runtime needs no simulator.** The reader, writer, port and sink protocols, and connection depend only on Foundation, build for macOS as well as iOS, and are tested on the build machine. Only the SwiftUI parts need a simulator.
 - **A screen's previews need no .NET.** A **preview port** in the Swift runtime plays the C# side, so a screen can be developed and previewed in Xcode from recorded or hand-written state.
 
@@ -131,8 +131,8 @@ Three properties hold across the layers:
 
 | Package | Holds |
 | --- | --- |
-| `AdamE.Oahu` | The core: the wire format, vocabulary, loop, sources, exporter and hosting surface, with the analyzer and source generator. No UI framework dependency. |
-| `AdamE.Oahu.Build` | The generator and the build targets that run it. |
+| `AdamE.Oahu` | The core: the wire format, vocabulary, loop, sources, exporter, hosting surface and property-change adapter. It also carries the analyzer and the C# generator, with the contract model they read, which run in the compiler of any project that references the package. No UI framework dependency. |
+| `AdamE.Oahu.Build` | The native code generator, which holds the contract model and the Swift emitter, and the build targets that run it. |
 | `AdamE.Oahu.iOS` | The iOS host, and the Swift runtime that the app's native library builds against. |
 
 An iOS app references all three. Its view models and contracts live in a library that references only `AdamE.Oahu`, so they stay testable without a device and reusable across platforms.
@@ -144,7 +144,7 @@ A host **must**:
 - connect a screen only through the core's hosting surface, which makes the contract check;
 - call the exporter only on the UI thread, and deliver each message to the native side within the call that carries it;
 - tear down in order: the native screen, then the exporter, then what it owns for the view model;
-- report every failure and fault it is handed, and end the app on a fault as the fault rule requires.
+- report every failure and fault it is handed, and end the app on a fault.
 
 A host **must not**:
 
@@ -155,7 +155,7 @@ A host **must not**:
 ## Invariants
 
 - **One thread.** Sources, exporters, ports, connections and models are used only on the UI thread. A change from another thread is a fault and changes nothing.
-- **Current is now; notification is later.** A source's value changes when it is set. Observers hear about it in a later turn, in the order sources changed.
+- **Current is now; notification is later.** A source's value changes when it is set. Observers hear about it in a later turn, in the order sources first changed in that turn.
 - **A native call returns to a settled screen.** What a member call changes, up to its first `await`, is delivered before the outermost native call returns.
 - **Subscription replays synchronously.** State, editables and keyed lists arrive before the subscribe call returns. Events are never replayed.
 - **Decode, then apply.** A message that does not decode completely changes nothing.
