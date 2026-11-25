@@ -32,6 +32,7 @@ A pull request must:
 - Build cleanly. Warnings are errors, and the code style rules in `.editorconfig` are enforced in the build.
 - Keep library code trim- and AOT-compatible. Every library project sets `IsAotCompatible`, so the trim and AOT analyzers run on every build and a violation fails it.
 - Add any new package version to `Directory.Packages.props`. Project files reference packages without a version.
+- Keep the wire format's specification, test vectors and code in step. A change to the format changes [`docs/wire-format.md`](docs/wire-format.md), the vectors in [`tests/conformance/wire-format`](tests/conformance/wire-format/README.md) and the code together, in the same pull request.
 
 To add a library project, add it to `Oahu.slnx` and copy `IsAotCompatible`, `GenerateDocumentationFile` and the `Microsoft.CodeAnalysis.PublicApiAnalyzers` reference from `src/core/AdamE.Oahu/AdamE.Oahu.csproj`. If the library ships as a package, also copy `IsPackable` and give it its own `PackageId` and `Description`; projects are not packed unless they set `IsPackable`. Then create `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` next to the project file, each starting with the line `#nullable enable`, as in `src/core/AdamE.Oahu`. If one file is missing, the build fails with RS0048.
 
