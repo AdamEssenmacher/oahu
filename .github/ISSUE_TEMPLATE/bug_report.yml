@@ -1,0 +1,44 @@
+name: Bug report
+description: Report something in an Oahu package that does not work as documented or as you would reasonably expect.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report security vulnerabilities privately instead, at https://github.com/AdamEssenmacher/oahu/security/advisories/new.
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      description: The Oahu package and its exact version, or the commit if you built from source.
+      placeholder: AdamE.Oahu x.y.z
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and target framework
+      description: The operating system and version you ran on, the target framework your app builds for, and the output of `dotnet --version`.
+      placeholder: macOS 15.2, net11.0, SDK 11.0.100
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include the full exception and stack trace if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest code or project that shows the problem, as a snippet or a link to a repository.
+    validations:
+      required: true
