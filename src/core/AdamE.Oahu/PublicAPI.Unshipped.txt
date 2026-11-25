@@ -11,10 +11,13 @@ AdamE.Oahu.Wire.OahuReader.ReadDouble() -> double
 AdamE.Oahu.Wire.OahuReader.ReadDuration() -> System.TimeSpan
 AdamE.Oahu.Wire.OahuReader.ReadInstant() -> System.DateTimeOffset
 AdamE.Oahu.Wire.OahuReader.ReadInt() -> int
+AdamE.Oahu.Wire.OahuReader.ReadList<T>(AdamE.Oahu.Wire.OahuReadFunc<T>! readItem) -> System.Collections.Generic.IReadOnlyList<T>!
 AdamE.Oahu.Wire.OahuReader.ReadLong() -> long
+AdamE.Oahu.Wire.OahuReader.ReadPresence() -> bool
 AdamE.Oahu.Wire.OahuReader.ReadString() -> string!
 AdamE.Oahu.Wire.OahuReader.ReadVarUInt() -> ulong
 AdamE.Oahu.Wire.OahuReader.Remaining.get -> int
+AdamE.Oahu.Wire.OahuReadFunc<T>
 AdamE.Oahu.Wire.OahuWriter
 AdamE.Oahu.Wire.OahuWriter.OahuWriter() -> void
 AdamE.Oahu.Wire.OahuWriter.OahuWriter(int initialCapacity) -> void
@@ -25,8 +28,11 @@ AdamE.Oahu.Wire.OahuWriter.WriteDouble(double value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteDuration(System.TimeSpan value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInstant(System.DateTimeOffset value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInt(int value) -> void
+AdamE.Oahu.Wire.OahuWriter.WriteList<T>(System.Collections.Generic.IReadOnlyList<T>! items, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! writeItem) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteLong(long value) -> void
+AdamE.Oahu.Wire.OahuWriter.WritePresence(bool present) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
 AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
 AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>
+virtual AdamE.Oahu.Wire.OahuReadFunc<T>.Invoke(ref AdamE.Oahu.Wire.OahuReader reader) -> T

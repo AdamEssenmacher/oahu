@@ -272,6 +272,92 @@ public ref struct OahuReader
         return Encoding.UTF8.GetString(bytes);
     }
 
+    /// <summary>
+    /// Reads the presence byte of a nullable value: 0 when the value is absent, 1 when it is present.
+    /// </summary>
+    /// <remarks>
+    /// A nullable value is its presence byte, followed by the value only when it is present. After
+    /// <see langword="true"/>, read the value itself; after <see langword="false"/>, the value is absent and has no
+    /// more bytes.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the value is present.</returns>
+    /// <exception cref="OahuFormatException">The input has ended, or the byte is neither 0 nor 1.</exception>
+    public bool ReadPresence()
+    {
+        var start = _offset;
+        if (start >= _input.Length)
+        {
+            throw new OahuFormatException($"The input ends before the presence byte at byte offset {start}.", start);
+        }
+
+        var b = _input[start];
+        if (b > 1)
+        {
+            throw new OahuFormatException(
+                $"The presence byte at byte offset {start} is 0x{b:x2}, which is neither 0x00 nor 0x01.", start);
+        }
+
+        _offset = start + 1;
+        return b != 0;
+    }
+
+    /// <summary>
+    /// Reads a list: the number of items, written as a count, followed by each item in order, read by
+    /// <paramref name="readItem"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every item takes at least one byte, so a count larger than the bytes that remain after it is rejected before
+    /// anything is allocated. This bounds this list's array by the bytes that remain, not the total allocated: for an
+    /// item type that contains itself, that total is bounded by the nesting depth times the size of the input, and deep
+    /// nesting can exhaust the stack. The format does not yet limit nesting depth.
+    /// </para>
+    /// <para>
+    /// The items are returned in an array of exactly the count's length. Apart from what <paramref name="readItem"/>
+    /// allocates for the items, that array is the only allocation. An empty list allocates nothing: it is the same shared
+    /// empty instance every time. Pass a method group of a static method or a <see langword="static"/> lambda for
+    /// <paramref name="readItem"/>, so that the delegate is created once and cached.
+    /// </para>
+    /// <para>
+    /// When the count is rejected, the reader stays where it was, at the start of the list. If
+    /// <paramref name="readItem"/> throws, the exception propagates, the items before it have been read, and the reader
+    /// is not used again.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The type of the items.</typeparam>
+    /// <param name="readItem">Reads one item from the reader it is given.</param>
+    /// <returns>The items read, in order.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="readItem"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OahuFormatException">
+    /// The count is malformed, as for <see cref="ReadCount"/>, or it is larger than the bytes that remain after it.
+    /// <paramref name="readItem"/> may throw it too, for a malformed item.
+    /// </exception>
+    public IReadOnlyList<T> ReadList<T>(OahuReadFunc<T> readItem)
+    {
+        ArgumentNullException.ThrowIfNull(readItem);
+
+        var start = _offset;
+        var count = ReadCount();
+        if (count == 0)
+            return Array.Empty<T>();
+
+        var available = _input.Length - _offset;
+        if (count > available)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The list at byte offset {start} has {count} item(s), but only {available} byte(s) remain after its " +
+                "count, and every item takes at least one byte.",
+                start);
+        }
+
+        var items = new T[count];
+        for (var i = 0; i < items.Length; i++)
+            items[i] = readItem(ref this);
+
+        return items;
+    }
+
     /// <summary>Checks that the whole input has been read.</summary>
     /// <exception cref="OahuFormatException">Bytes remain after the last value read.</exception>
     public readonly void EnsureEnd()

@@ -176,6 +176,74 @@ public sealed class OahuWriter
         _count += prefixSize + bytesWritten;
     }
 
+    /// <summary>
+    /// Writes the presence byte of a nullable value: 0 when the value is absent, 1 when it is present.
+    /// </summary>
+    /// <remarks>
+    /// A nullable value is its presence byte, followed by the value only when it is present. After writing
+    /// <see langword="true"/>, write the value itself; after <see langword="false"/>, write nothing more for it.
+    /// </remarks>
+    /// <param name="present"><see langword="true"/> when the value is present.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WritePresence(bool present) => Reserve(1)[0] = present ? (byte)1 : (byte)0;
+
+    /// <summary>
+    /// Writes a list: the number of items, written as a count, followed by each item in order, written by
+    /// <paramref name="writeItem"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every item must take at least one byte, because a reader rejects a count larger than the bytes that remain after
+    /// it. Items can be of any kind, including lists and nullable values. The list must not change while it is written.
+    /// </para>
+    /// <para>
+    /// Pass a method group of a static method or a <see langword="static"/> lambda for <paramref name="writeItem"/>, so
+    /// that the delegate is created once and cached. The method itself allocates nothing.
+    /// </para>
+    /// <para>
+    /// <see cref="IReadOnlyCollection{T}.Count"/> is read once, before the count is written, and that many items are
+    /// written. After the items, the method checks that they wrote at least as many bytes as there are items, so that a
+    /// reader accepts the count. It does not check each item on its own.
+    /// </para>
+    /// <para>
+    /// A <see langword="null"/> argument throws before anything is written. If <paramref name="writeItem"/> throws, or
+    /// the items wrote fewer bytes than there are items, the exception propagates and the writer's contents are
+    /// unspecified: call <see cref="Reset"/> before writing another message.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The type of the items.</typeparam>
+    /// <param name="items">The items to write.</param>
+    /// <param name="writeItem">Writes one item to the writer it is given.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="items"/> or <paramref name="writeItem"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The message would be longer than <see cref="Array.MaxLength"/> bytes, or the items wrote fewer bytes than there
+    /// are items.
+    /// </exception>
+    public void WriteList<T>(IReadOnlyList<T> items, Action<OahuWriter, T> writeItem)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        ArgumentNullException.ThrowIfNull(writeItem);
+
+        // Indexing, not foreach, so that no enumerator is boxed.
+        var count = items.Count;
+        WriteCount(count);
+        var itemsStart = _count;
+        for (var i = 0; i < count; i++)
+            writeItem(this, items[i]);
+
+        // One check per list. It guarantees that a reader's count check passes, but it does not prove that each item
+        // wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make up for it.
+        var itemBytes = _count - itemsStart;
+        if (itemBytes < count)
+        {
+            throw new InvalidOperationException(
+                $"The list's {count} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
+                "Every item must write at least one byte.");
+        }
+    }
+
     // Seven value bits per byte; zero still takes one byte.
     private static int VarUIntSize(ulong value) => (70 - BitOperations.LeadingZeroCount(value | 1)) / 7;
 
