@@ -6,7 +6,7 @@ Oahu is built in a planned order, so that each part lands on top of the parts it
 
 - Work lands in small pull requests. Each adds one discrete, named capability, with its tests and documentation, and `main` builds and passes its tests after every one.
 - A milestone below is a grouping of related pull requests, not a pull request. Its pull requests are planned when the milestone starts, and the order within a milestone may shift.
-- No package is published until the iOS release gate (milestone 14).
+- No package is published until the iOS release gate (milestone 13).
 
 A checked box means the work is merged to `main`.
 
@@ -32,15 +32,15 @@ The core is the `AdamE.Oahu` package. Its milestones are the first seven [layers
 
 ## iOS
 
-These milestones add the Swift side and the iOS host, and end with the first preview packages. They are planned in small pull requests the same way.
+These milestones add the Swift side and the iOS host. The first preview packages ship at the release gate, for iOS 17 and later. They are planned in small pull requests the same way.
 
 - [ ] **8. Swift runtime.** The Swift reader and writer, passing the format's test vectors; the fixed interface; the connection; events and keyed lists; the preview port; the SwiftUI container; the mount registry and mount view; text editing; the runtime built as an XCFramework for device and simulator. Adds Swift package tests to continuous integration, on the build machine first and on a simulator when the SwiftUI parts land.
 - [ ] **9. Swift emitter.** The generated Swift for a contract: value types and their codecs, the model, and the screen provider. A conformance package that compiles generated Swift and passes vectors written by the C# side.
 - [ ] **10. Build integration.** The native code generator, with one command line that writes its output or checks that it is current; the build targets that run it, build the app's Swift package into an XCFramework and package it with each build; the `AdamE.Oahu.Build` package. Tests for a cold build, an incremental build, a renamed contract that leaves no stale output, and a generation error that stops the native build.
 - [ ] **11. iOS host.** The binding of the fixed interface; the port; screen lookup; showing a container or a mount in a .NET iOS app; the `AdamE.Oahu.iOS` package. A small sample app, built and run on a simulator in continuous integration.
 - [ ] **12. Property-change adapter.** The public seam adapters build on; sources over an existing `INotifyPropertyChanged` view model, its commands and its collections.
-- [ ] **13. iOS 16.** Support for apps that opt in to iOS 16: a second form of the generated model, and the runtime's fallbacks for it.
-- [ ] **14. iOS release gate.** Package inspection; a guide to setting up an iOS app by hand; a clean consumer app, built from the packed packages for device and simulator, with Native AOT, and run on a simulator; the release workflow; and the first preview packages of `AdamE.Oahu`, `AdamE.Oahu.Build` and `AdamE.Oahu.iOS`.
+- [ ] **13. iOS release gate.** Package inspection; a guide to setting up an iOS app by hand; a clean consumer app, built from the packed packages for device and simulator, with Native AOT, and run on a simulator; the release workflow; and the first preview packages of `AdamE.Oahu`, `AdamE.Oahu.Build` and `AdamE.Oahu.iOS`.
+- [ ] **14. iOS 16.** Support for apps that opt in to iOS 16, in a later preview: a second form of the generated model, and the runtime's fallbacks for it.
 
 ## Android
 
@@ -49,7 +49,7 @@ Android follows iOS with the same three native layers. These milestones are less
 - [ ] **15. Kotlin runtime.** The Kotlin reader and writer, passing the format's test vectors; the fixed interface over JNI; the connection; events and keyed lists; the preview port; the Compose container and mount. Adds Gradle builds to continuous integration.
 - [ ] **16. Kotlin emitter.** The generated Kotlin for a contract, and its conformance suite.
 - [ ] **17. Android host.** The binding, the port, screen lookup, and showing a container or a mount in a .NET Android app; the build targets for the app's Gradle module; the `AdamE.Oahu.Android` package.
-- [ ] **18. Android release gate.** The checks of milestone 14 for Android, and the first preview package of `AdamE.Oahu.Android`.
+- [ ] **18. Android release gate.** The checks of milestone 13 for Android, and the first preview package of `AdamE.Oahu.Android`.
 
 ## Not scheduled
 
