@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the three stream interfaces `IOahuState<T>`, `IOahuEditable<T>` and `IOahuEvents<T>`, and the no-value type `OahuUnit`. Later pull requests add keyed lists (`IOahuKeyedList<T>`, with their rows and list operations), methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, and the no-value type `OahuUnit`. Later pull requests add the encoding of a keyed list's batch, methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -18,7 +18,7 @@ The vocabulary is in the `AdamE.Oahu` namespace, the one an app author imports. 
 
 ## State and events
 
-The vocabulary has three kinds of stream so far: state and events, described here, and [editable values](#editable-values), which are states the screen can also change. The rules below are requirements on every implementation of the stream interfaces. Oahu's own sources keep them, and an implementation of your own, such as an adapter or a hand-written state, must keep them too, because the exporter and other observers rely on them.
+The vocabulary has four kinds of stream: state and events, described here, [editable values](#editable-values), which are states the screen can also change, and [keyed lists](#keyed-lists), which send a list's changes row by row. The rules below are requirements on every implementation of the stream interfaces. Oahu's own sources keep them, and an implementation of your own, such as an adapter or a hand-written state, must keep them too, because the exporter and other observers rely on them.
 
 **State** (`IOahuState<T>`) is a value that always has a current one: a title, a count, the status of a download. Use it for anything the screen draws from.
 
@@ -85,6 +85,108 @@ public interface IRenameViewModel
 
 The screen binds a text field to the title. The model has the title from the moment the screen subscribes, like any state. When the user types, the model does not take the new text for itself: it sends the edit, and shows only what the view model publishes. Suppose the view model trims spaces from the end of a title. The user types "Plan" and the view model accepts it, so the field shows "Plan". The user types a space: the view model settles on "Plan", the value it already had, so the edit changes nothing and the field goes on showing "Plan". What the view model publishes reaches the screen before the outermost native call returns; an edit the screen makes while it is receiving a message is delivered later in the delivery turn already running. The [architecture](architecture.md#other-operations) says this, and also describes how the exporter checks the settlement.
 
+## Keyed lists
+
+A **keyed list** (`IOahuKeyedList<T>`) is a list of rows with stable keys, such as the rows of a table or the messages of a chat. It is sent to the screen as operations on the list, not as the list, so that a native list can animate each change and keep each row's identity: its place on screen, its selection, its scroll position.
+
+Use it instead of a state of a list, `IOahuState<IReadOnlyList<T>>`, when the screen shows the items as rows that the user sees come, go and move. A state of a list replaces the whole list: each change delivers the new list, and the screen has only the new list to tell what changed. A keyed list delivers the changes themselves, and each costs what it changes, not the whole list. A state of a list is still right for a small list that the screen draws as one thing, such as the names in a line of text.
+
+These rules, like those above, are requirements on every implementation.
+
+### Rows and keys
+
+A row is a record or a readonly record struct that implements `IOahuKeyed`, whose one member is the row's key, `string Key`. The key is a parameter of the record's primary constructor, so it is one of the row's fields and is written on the wire like any other:
+
+```csharp
+public sealed record TaskRow(string Key, string Text, bool Done) : IOahuKeyed;
+```
+
+A row can also be a union, if every case has the positional `Key` and passes it, unchanged, to the union's base record:
+
+```csharp
+public abstract record BoardRow(string Key) : IOahuKeyed
+{
+    public sealed record Header(string Key, string Title) : BoardRow(Key);
+    public sealed record Card(string Key, string Text) : BoardRow(Key);
+}
+```
+
+Each case passes its own `Key` parameter to the union's, so that the interface's `Key` is the case's `Key` field. `Card(string Key, string Text) : BoardRow(Text)` is a mistake that the compiler reports only as warning CS8907, an unread parameter. In a project where warnings are not errors it builds, and then `Key` returns the text.
+
+- **A key is the row's identity.** An operation that names a row with a key names the same row as every earlier one with that key. A row that changes its value and keeps its key is the same row, replaced. A row whose key changes is another row: remove the old one and insert the new one.
+- **Keys are unique within a list at every moment**: before and after every operation, including between the operations of one batch. A key can be used again once the row that had it is removed, even later in the same batch. A batch that would give two rows one key is not valid, as [Batches](#batches) says.
+- **A key is never null, and is well-formed UTF-16**, with no lone surrogate. The wire format writes a lone surrogate as U+FFFD, as [Strings](wire-format.md#strings) says, so two different keys could otherwise arrive as one.
+- **Keys compare ordinally**, by their UTF-16 code units, with no culture and no Unicode normalization: two strings that differ only in normalization are two keys. The native runtimes compare keys the same way, so a native list has exactly the rows and the identities that the C# list has.
+- **A row has no field named `Id`.** A native row can be identified by its key under the name `id`, as a Swift `Identifiable` is, and a field named `Id` would take that name too.
+
+A note for native runtimes: compare keys by their code units, not with a string equality that does more. Swift's `String` equality treats canonically equivalent strings as equal, so a Swift runtime cannot compare keys as `String` values.
+
+### Operations
+
+An operation, `ListOp<T>`, is one of five cases. An index refers to the list as it is when that operation applies.
+
+| Operation | Does | Valid when |
+| --- | --- | --- |
+| `Insert(Index, Item)` | Inserts a row so that it ends up at `Index`; the rows from there on move one place later | `Index` is from 0 to the count, inclusive, and the list has no row with the item's key |
+| `Remove(Index)` | Removes the row at `Index`; the rows after it move one place earlier | `Index` is from 0 to the count, exclusive |
+| `Move(From, To)` | Removes the row at `From`, then inserts it at `To`, so `To` is the row's index afterwards; it is the same row | both are from 0 to the count, exclusive: `From` in the list before the move, `To` in the list after it |
+| `Replace(Index, Item)` | Gives the row at `Index` a new value; it is the same row | `Index` is from 0 to the count, exclusive, and the item has the key of the row it replaces |
+| `Clear()` | Removes every row | always |
+
+On [a, b, c, d], `Move(0, 2)` gives [b, c, a, d], and `Move(2, 0)` gives [c, a, b, d].
+
+A note for native runtimes: SwiftUI's `move(fromOffsets:toOffset:)` takes the destination as an offset in the list before the removal, which is `To + 1` when `To` is greater than `From`, and `To` otherwise. For `Move(0, 2)` it is offset 3.
+
+An item is never null. A move to its own index and a replace with an equal value change nothing, and are still operations.
+
+Operations compare with C# record equality: two are equal when they are the same case with equal arguments, and a row compares with its type's `Equals`. The default comparer compares a list field of a record by reference, so two operations whose rows are equal by structure but hold different list instances are not equal, and a replace with such a row is not a replace with an equal value. Oahu's own comparison arrives with structural equality in a later part of the vocabulary.
+
+An operation checks nothing when it is created, not even that an index is not negative: whether an index is in range depends on the list it applies to, so whoever applies the operation checks it there.
+
+The five cases are the only ones. `ListOp<T>` is a `closed` record: no type in another assembly can derive from it, and a `switch` that handles the five is complete, with no discard arm. Its type argument is a row, an `IOahuKeyed`. `ListOp<T>` is shaped like a union, but it is not a contract value: a contract never uses it as the type of a stream, a field or an argument. A keyed list carries it.
+
+### Batches
+
+Each notification of a keyed list is a **batch**: a list of operations, `IReadOnlyList<ListOp<T>>`.
+
+- **In order.** The operations of a batch apply one after another. Each index refers to the list as it is after every operation before it in the batch.
+- **All together or not at all.** When the view model applies a batch, `Items`, the rows now, changes at once by the whole batch. A batch with an operation that is not valid where it applies changes nothing: `Items` stays as it was and nothing is delivered. Whether such a batch is thrown to its caller or reported as a fault is specified with the sources. A batch with no operations changes nothing and delivers nothing.
+- **Replay.** A new observer receives the current rows during `Subscribe`, before it returns, as one batch: a `Clear`, then an `Insert` of each row of `Items`, in order, at indexes 0, 1, 2 and on. For an empty list it is one `Clear`.
+- **Delivery.** Then, in later delivery turns, an observer receives every operation applied since its last delivery, or since its replay, in order, as one batch. No operation is dropped, merged with another or reordered, and none reaches it twice: an operation applied before it subscribed is part of its replay. Several batches applied before a turn arrive as one batch, the operations of the first followed by those of the next. A delivered batch is never empty.
+- **More than one in a turn.** A delivery turn runs until its queue is empty, as the [architecture](architecture.md#the-path-of-one-change) says. So when the list changes during a turn, after an observer has received its batch, the observer receives those operations as another batch later in the same turn.
+- **A delivered batch is a value.** It never changes afterwards, contains no null operation, and may be one list instance shared by several observers.
+- **What the observer holds.** Applying every batch an observer has received, in order, to an empty list gives the rows `Items` had after the last operation that observer received.
+- **`Items` is a value.** A list that `Items` returned does not change afterwards; a later change gives a new list.
+- **Like the other streams.** Observers hear of a change in a later delivery turn, never during the call that changed the list. Disposing a subscription stops all delivery to it at once. A keyed list never completes and never fails. It is used only on the UI thread: `Items` is read there, observers subscribe and dispose there, and batches are delivered there; changing a keyed list on another thread is a fault. An exception thrown by an observer is a fault. [State and events](#state-and-events) gives these rules in full.
+
+The exporter writes each batch, the replay included, as one message, and the native model applies it all together or not at all, so the screen's list is never left half-changed. How a batch is written on the wire is the next part of the vocabulary; the [wire format](wire-format.md) does not give it yet.
+
+`IOahuKeyedList<T>` is invariant: a batch is a list of `ListOp<T>`, which is a record, and a class cannot vary in its type argument. So a keyed list of one row type is never a keyed list of another.
+
+### A keyed list on a screen
+
+A screen that lists tasks:
+
+```csharp
+[OahuContract]
+public interface ITasksViewModel
+{
+    IOahuKeyedList<TaskRow> Tasks { get; }
+}
+
+public sealed record TaskRow(string Key, string Text, bool Done) : IOahuKeyed;
+```
+
+The model has the rows from the moment the screen subscribes: say `t0` "Milk", `t1` "Bread" and `t2` "Eggs", which arrive as a `Clear` and three inserts. Now the view model marks Milk done, moves Eggs to the top and adds "Butter" at the end, in three batches before the next delivery turn:
+
+```csharp
+IReadOnlyList<ListOp<TaskRow>> markDone = [new ListOp<TaskRow>.Replace(0, new TaskRow("t0", "Milk", true))];
+IReadOnlyList<ListOp<TaskRow>> eggsFirst = [new ListOp<TaskRow>.Move(2, 0)];
+IReadOnlyList<ListOp<TaskRow>> addButter = [new ListOp<TaskRow>.Insert(3, new TaskRow("t3", "Butter", false))];
+```
+
+`Items` changes at each one. In the next delivery turn the screen receives the three operations as one batch, in that order. The `Move` refers to the list after the `Replace`, and the `Insert` to the list after the `Move`, so the screen ends with Eggs, Milk (done), Bread and Butter. The native list redraws Milk in place, animates Eggs to the top and Butter in at the end, and keeps every other row as it was.
+
 ## An example
 
 A screen that shows a download:
@@ -132,7 +234,7 @@ A stream carries values of these types. Each links to the section of the wire fo
 | [List](wire-format.md#lists) | `IReadOnlyList<T>` of any of these |
 | [No value](wire-format.md#the-no-value-type) | `OahuUnit`, only as the whole type of an events stream, as [No value](#no-value) says |
 
-No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
+A keyed list's rows are records or unions, as [Rows and keys](#rows-and-keys) says. No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
 
 ## Rules for values
 
@@ -145,6 +247,7 @@ The wire format relies on these rules and gives no bytes to a type that breaks o
 - **Cycles.** No record contains its own type through record fields alone, directly or through other records, with no list, nullable value or union on the way.
 - **Enums.** An enum has at least one member, no two members with the same number, and no `[Flags]` attribute.
 - **List items.** A list's item type is never a record that is no bytes, which is a record whose fields are all records that are no bytes, such as a record with no fields; a nullable value of such a record is allowed.
+- **Rows.** A keyed list's row type is a record or a union, never nullable, that implements `IOahuKeyed` through a positional `string Key` parameter: on the record, or on every case of the union, which passes it unchanged to the union's base record. The `Key` that `IOahuKeyed` returns is the property of that parameter, not another implementation, so the key the screen sees is the one C# compares. A row has no field named `Id`, as [Rows and keys](#rows-and-keys) says.
 - **No value.** `OahuUnit` is only ever the whole type of an events stream, as [No value](#no-value) says.
 
 ## No value
