@@ -59,7 +59,7 @@ State and events both follow these rules too:
 - **One thread.** A stream is used only on the UI thread: `Current` is read there, observers subscribe and dispose their subscriptions there, and values are delivered there. Changing a state's value or publishing an occurrence on another thread is a fault, as the [architecture](architecture.md#invariants) says. Reading `Current`, subscribing or disposing a subscription on another thread is a mistake too; whether Oahu reports it as a fault is specified with the sources, so an implementation must not rely on it being allowed.
 - **Observer exceptions.** An exception thrown by an observer is a fault, as the [architecture](architecture.md#other-operations) says. The details arrive with the sources.
 
-The [architecture](architecture.md#the-path-of-one-change) describes delivery turns and the loop that runs them.
+The [architecture](architecture.md#the-path-of-one-change) describes delivery turns and [the loop](loop.md) that runs them.
 
 ## Editable values
 
@@ -309,7 +309,7 @@ Nothing about a failure is returned to the screen. A failure is for what the vie
 
 ### Threading and re-entrancy
 
-A method is called on the UI thread, like everything on the seam, as the [architecture](architecture.md#invariants) says. A change it makes to a source must be made on the UI thread too, after an `await` as before one. Where the code after an `await` resumes is specified with the loop. A method's code that continues off the UI thread, as it may after `ConfigureAwait(false)`, must not change a source there: that is a fault.
+A method is called on the UI thread, like everything on the seam, as the [architecture](architecture.md#invariants) says. A change it makes to a source must be made on the UI thread too, after an `await` as before one. Where the code after an `await` resumes is specified with [the loop](loop.md#where-code-after-an-await-resumes). A method's code that continues off the UI thread, as it may after `ConfigureAwait(false)`, must not change a source there: that is a fault.
 
 A call the screen makes while it is receiving a message is not outermost. What it changes is delivered later in the delivery turn already running, not before the call returns, as the [architecture](architecture.md#the-path-of-one-change) says.
 

@@ -1,4 +1,12 @@
 #nullable enable
+AdamE.Oahu.Hosting.IOahuDispatcher
+AdamE.Oahu.Hosting.IOahuDispatcher.IsOnThread.get -> bool
+AdamE.Oahu.Hosting.IOahuDispatcher.TryPost(System.Action! action) -> bool
+AdamE.Oahu.Hosting.IOahuFaultSink
+AdamE.Oahu.Hosting.IOahuFaultSink.ReportFault(System.Exception! exception) -> void
+AdamE.Oahu.Hosting.OahuLoop
+AdamE.Oahu.Hosting.OahuLoop.Dispose() -> void
+AdamE.Oahu.Hosting.OahuLoop.OahuLoop(AdamE.Oahu.Hosting.IOahuDispatcher! dispatcher, AdamE.Oahu.Hosting.IOahuFaultSink! faultSink) -> void
 AdamE.Oahu.IOahuEditable<T>
 AdamE.Oahu.IOahuEditable<T>.Edit(T value) -> void
 AdamE.Oahu.IOahuEvents<T>
@@ -45,6 +53,7 @@ AdamE.Oahu.ListOp<T>.Replace.Item.init -> void
 AdamE.Oahu.ListOp<T>.Replace.Replace(int Index, T Item) -> void
 AdamE.Oahu.OahuContractAttribute
 AdamE.Oahu.OahuContractAttribute.OahuContractAttribute() -> void
+AdamE.Oahu.OahuFaultException
 AdamE.Oahu.OahuList
 AdamE.Oahu.OahuList<T>
 AdamE.Oahu.OahuList<T>.AsSpan() -> System.ReadOnlySpan<T>
