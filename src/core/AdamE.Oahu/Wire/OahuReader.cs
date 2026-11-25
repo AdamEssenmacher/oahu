@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace AdamE.Oahu.Wire;
 
 /// <summary>
@@ -101,6 +103,86 @@ public ref struct OahuReader
         }
 
         return (int)value;
+    }
+
+    /// <summary>Reads a bool: one byte, 0 for <see langword="false"/> or 1 for <see langword="true"/>.</summary>
+    /// <returns>The value read.</returns>
+    /// <exception cref="OahuFormatException">The input has ended, or the byte is neither 0 nor 1.</exception>
+    public bool ReadBool()
+    {
+        var start = _offset;
+        if (start >= _input.Length)
+        {
+            throw new OahuFormatException($"The input ends before the bool at byte offset {start}.", start);
+        }
+
+        var b = _input[start];
+        if (b > 1)
+        {
+            throw new OahuFormatException(
+                $"The bool at byte offset {start} is 0x{b:x2}, which is neither 0x00 nor 0x01.", start);
+        }
+
+        _offset = start + 1;
+        return b != 0;
+    }
+
+    /// <summary>Reads an <see cref="int"/>, zigzag-encoded and written as an unsigned variable-length integer.</summary>
+    /// <remarks>
+    /// The integer's value, before the zigzag step is undone, must be at most <see cref="uint.MaxValue"/>. An encoding
+    /// longer than the shortest form is accepted when its value is in that range.
+    /// </remarks>
+    /// <returns>The value read.</returns>
+    /// <exception cref="OahuFormatException">
+    /// The integer is malformed, as for <see cref="ReadVarUInt"/>, or its value is larger than <see cref="uint.MaxValue"/>,
+    /// so it does not fit in 32 bits.
+    /// </exception>
+    public int ReadInt()
+    {
+        var start = _offset;
+        var value = ReadVarUInt();
+        if (value > uint.MaxValue)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The int at byte offset {start} does not fit in 32 bits: its zigzag-encoded value {value} is larger " +
+                $"than {uint.MaxValue}.",
+                start);
+        }
+
+        var zigzag = (uint)value;
+        return (int)(zigzag >> 1) ^ -(int)(zigzag & 1);
+    }
+
+    /// <summary>Reads a <see cref="long"/>, zigzag-encoded and written as an unsigned variable-length integer.</summary>
+    /// <returns>The value read.</returns>
+    /// <exception cref="OahuFormatException">The integer is malformed, as for <see cref="ReadVarUInt"/>.</exception>
+    public long ReadLong()
+    {
+        var zigzag = ReadVarUInt();
+        return (long)(zigzag >> 1) ^ -(long)(zigzag & 1);
+    }
+
+    /// <summary>Reads a double: eight bytes, its IEEE 754 bit pattern, little-endian.</summary>
+    /// <remarks>
+    /// Every bit pattern is accepted, and the value returned has exactly the bits read, including negative zero and a
+    /// NaN's sign and payload. The format does not promise that a NaN's payload survives from the writer's side, because a
+    /// runtime may quieten a signalling NaN before it is written.
+    /// </remarks>
+    /// <returns>The value read.</returns>
+    /// <exception cref="OahuFormatException">Fewer than eight bytes remain.</exception>
+    public double ReadDouble()
+    {
+        var start = _offset;
+        if (_input.Length - start < sizeof(double))
+        {
+            throw new OahuFormatException(
+                $"The input ends inside a double that starts at byte offset {start}.", start);
+        }
+
+        var bits = BinaryPrimitives.ReadInt64LittleEndian(_input.Slice(start, sizeof(double)));
+        _offset = start + sizeof(double);
+        return BitConverter.Int64BitsToDouble(bits);
     }
 
     /// <summary>Checks that the whole input has been read.</summary>

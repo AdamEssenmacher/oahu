@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 
 namespace AdamE.Oahu.Wire;
@@ -71,6 +72,38 @@ public sealed class OahuWriter
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         WriteVarUInt((ulong)count);
     }
+
+    /// <summary>Writes <paramref name="value"/> as one byte: 0 for <see langword="false"/>, 1 for <see langword="true"/>.</summary>
+    /// <param name="value">The value to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteBool(bool value) => Reserve(1)[0] = value ? (byte)1 : (byte)0;
+
+    /// <summary>
+    /// Writes <paramref name="value"/> zigzag-encoded, as an unsigned variable-length integer in the shortest form: 1 to
+    /// 5 bytes.
+    /// </summary>
+    /// <param name="value">The value to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteInt(int value) => WriteVarUInt((uint)((value << 1) ^ (value >> 31)));
+
+    /// <summary>
+    /// Writes <paramref name="value"/> zigzag-encoded, as an unsigned variable-length integer in the shortest form: 1 to
+    /// 10 bytes.
+    /// </summary>
+    /// <param name="value">The value to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteLong(long value) => WriteVarUInt((ulong)((value << 1) ^ (value >> 63)));
+
+    /// <summary>Writes <paramref name="value"/> as eight bytes: its IEEE 754 bit pattern, little-endian.</summary>
+    /// <remarks>
+    /// The bits of <paramref name="value"/> are written unchanged, including negative zero and a NaN's sign and payload.
+    /// The format does not promise that a NaN's payload survives to the reader's side, because a runtime may quieten a
+    /// signalling NaN before it reaches a writer.
+    /// </remarks>
+    /// <param name="value">The value to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteDouble(double value) =>
+        BinaryPrimitives.WriteInt64LittleEndian(Reserve(sizeof(double)), BitConverter.DoubleToInt64Bits(value));
 
     // Seven value bits per byte; zero still takes one byte.
     private static int VarUIntSize(ulong value) => (70 - BitOperations.LeadingZeroCount(value | 1)) / 7;

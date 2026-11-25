@@ -68,6 +68,40 @@ public sealed class OahuReaderTests
     }
 
     [Fact]
+    public void Values_of_mixed_kinds_are_read_in_the_order_written()
+    {
+        var writer = new OahuWriter(1);
+        writer.WriteBool(true);
+        writer.WriteInt(-65);
+        writer.WriteDouble(-0.0);
+        writer.WriteLong(long.MinValue);
+        writer.WriteCount(3);
+        writer.WriteBool(false);
+        writer.WriteDouble(1.5);
+        writer.WriteInt(int.MaxValue);
+        writer.WriteVarUInt(300);
+        writer.WriteLong(1);
+
+        Assert.Equal(
+            "01" + "8101" + "0000000000000080" + "ffffffffffffffffff01" + "03" + "00" + "000000000000f83f" +
+            "feffffff0f" + "ac02" + "02",
+            Hex.Of(writer.WrittenSpan));
+
+        var reader = new OahuReader(writer.WrittenSpan);
+        Assert.True(reader.ReadBool());
+        Assert.Equal(-65, reader.ReadInt());
+        Assert.Equal(long.MinValue, BitConverter.DoubleToInt64Bits(reader.ReadDouble()));
+        Assert.Equal(long.MinValue, reader.ReadLong());
+        Assert.Equal(3, reader.ReadCount());
+        Assert.False(reader.ReadBool());
+        Assert.Equal(1.5, reader.ReadDouble());
+        Assert.Equal(int.MaxValue, reader.ReadInt());
+        Assert.Equal(300UL, reader.ReadVarUInt());
+        Assert.Equal(1L, reader.ReadLong());
+        reader.EnsureEnd();
+    }
+
+    [Fact]
     public void A_format_error_is_a_FormatException()
     {
         var exception = Assert.Throws<OahuFormatException>(() =>
