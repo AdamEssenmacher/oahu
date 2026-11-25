@@ -1,4 +1,6 @@
 #nullable enable
+AdamE.Oahu.IOahuEditable<T>
+AdamE.Oahu.IOahuEditable<T>.Edit(T value) -> void
 AdamE.Oahu.IOahuEvents<T>
 AdamE.Oahu.IOahuState<T>
 AdamE.Oahu.IOahuState<T>.Current.get -> T

@@ -24,6 +24,22 @@ public sealed class ContractShapeTests
         }
     }
 
+    // Not a source either: it refuses every edit, so its value never changes and it never delivers later.
+    private sealed class RefusingEditable<T>(T current) : IOahuEditable<T>
+    {
+        public T Current { get; } = current;
+
+        public IDisposable Subscribe(IObserver<T> observer)
+        {
+            observer.OnNext(Current);
+            return NoSubscription.Instance;
+        }
+
+        public void Edit(T value)
+        {
+        }
+    }
+
     private sealed class SilentEvents<T> : IOahuEvents<T>
     {
         public IDisposable Subscribe(IObserver<T> observer) => NoSubscription.Instance;
@@ -54,6 +70,23 @@ public sealed class ContractShapeTests
 
         Assert.NotNull(viewModel.FileName);
         Assert.NotNull(viewModel.Messages);
+    }
+
+    [Fact]
+    public void An_editable_is_a_state_and_widens_as_one()
+    {
+        // IOahuEditable<T> is invariant, but it derives from the covariant IOahuState<T>, so it converts to a state
+        // of its own type or of a wider one. It does not convert to an IOahuEditable<object>.
+        IOahuEditable<string> editable = new RefusingEditable<string>("x");
+
+        IOahuState<string> state = editable;
+        IOahuState<object> widened = editable;
+        IObservable<object> observable = editable;
+
+        Assert.Equal("x", state.Current);
+        Assert.Equal("x", widened.Current);
+        Assert.Same(editable, observable);
+        Assert.False(typeof(IOahuEditable<object>).IsAssignableFrom(typeof(IOahuEditable<string>)));
     }
 
     [Fact]
