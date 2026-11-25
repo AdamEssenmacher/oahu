@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using AdamE.Oahu.Wire;
 using Xunit;
@@ -733,9 +734,11 @@ public sealed class NestingDepthTests
 
     // A union with a case of no fields, a case holding a list of the union and a case holding a nullable value of the
     // union, with the codec a generator would write for it: it enters once for the union value and not again for its
-    // case. A case is written as its index, a count, then its fields.
+    // case. A case is written as its index, then its fields.
     private sealed class Shape
     {
+        private const int CaseCount = 3;
+
         private Shape(int caseIndex, IReadOnlyList<Shape> shapes, Shape? inner)
         {
             CaseIndex = caseIndex;
@@ -770,13 +773,12 @@ public sealed class NestingDepthTests
         public static Shape Read(ref OahuReader reader)
         {
             reader.EnterNested();
-            var caseIndex = reader.ReadCount();
-            var shape = caseIndex switch
+            var shape = reader.ReadIndex(CaseCount) switch
             {
                 0 => Leaf(),
                 1 => Group(reader.ReadList(Read)),
                 2 => Wrap(reader.ReadPresence() ? Read(ref reader) : null),
-                _ => throw new InvalidOperationException($"Unknown case {caseIndex}."),
+                _ => throw new UnreachableException(),
             };
             reader.ExitNested();
             return shape;
@@ -814,7 +816,7 @@ public sealed class NestingDepthTests
 
         private static void WriteCase(OahuWriter writer, Shape shape, Action<OahuWriter, Shape> writeShape)
         {
-            writer.WriteCount(shape.CaseIndex);
+            writer.WriteIndex(shape.CaseIndex, CaseCount);
             if (shape.CaseIndex == 1)
             {
                 writer.WriteList(shape.Shapes, writeShape);

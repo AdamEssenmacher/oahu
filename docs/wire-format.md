@@ -2,11 +2,13 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists and the nesting depth of records and unions.
+This page covers the whole format except the batches of a keyed list, which a later milestone adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, enums, unions and the nesting depth of records and unions.
 
 ## Messages
 
 A message is the bytes of one value and nothing else. It has no header, tag, length or schema. Both sides are generated from the same contract, so the reader already knows the type of the value it reads.
+
+A contract is a C# interface marked `[OahuContract]` that declares what a screen observes and calls, and with it the types of the values that cross; [Architecture](architecture.md#the-central-idea) describes it. A codec is the code, generated from the contract, that writes and reads the values of one type: in C# it calls `OahuWriter` and `OahuReader`, and each native language has its own.
 
 A reader reads the value from the first byte. When the value is read, the message must have ended. Bytes left over make the message malformed.
 
@@ -179,6 +181,8 @@ A nullable value is one presence byte, then the value when it is present. The pr
 | The empty string | `01 00` |
 | The double 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 
+The type of a nullable value is never itself nullable, so a nullable value always has exactly one presence byte.
+
 A reader rejects any presence byte other than `00` and `01`, such as `02` or `ff`.
 
 In C#, `OahuWriter.WritePresence` writes the presence byte and `OahuReader.ReadPresence` reads it. After `true`, the caller writes or reads the value itself.
@@ -196,7 +200,7 @@ A list is the number of its items as a count, then each item in order. Each item
 | One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 | 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
 
-Every item of a list takes at least one byte. The contract rules forbid an item type whose values can be written as no bytes at all. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
+Every item of a list takes at least one byte. The contract rules forbid an item type whose values are no bytes, which is a record that is no bytes as [Records](#records) defines it. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
 
 Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
 
@@ -207,24 +211,139 @@ Lists nest. An item can be any value: a list, a nullable value, a string and so 
 
 In C#, `OahuWriter.WriteList` and `OahuReader.ReadList` take a delegate that writes or reads one item. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `ReadList` returns an array of exactly the count's length and allocates nothing else, apart from what the delegate allocates for the items; an empty list is the same shared instance every time. `WriteList` reads the list's `Count` once. After the items, it throws `InvalidOperationException` if they wrote fewer bytes than there are items; it does not check each item on its own. It also throws `InvalidOperationException` if the delegate reset the writer. If the delegate throws, or `WriteList` does, the exception propagates. The writer's contents are then unspecified, so reset it before writing another message.
 
+## Records
+
+This page writes a record in a short notation: `record Item(string Name, int Quantity)` stands for the C# positional record `public sealed record Item(string Name, int Quantity);`, or a positional `record struct` with the same parameters, which has the same bytes. The contract rules, on a later page, say which records, enums and unions a contract may declare. This page fixes only their bytes. Where it says the contract rules forbid something, the format gives it no bytes.
+
+A record's fields are the parameters of its own primary constructor, in the order they are declared. Nothing else is a field:
+
+- A property declared in the record's body is not a field and is never written. The contract rules forbid a record whose state is not all in its fields, so such a property can only be computed from them.
+- A parameter of a base record's primary constructor is not a field of a derived record. A derived record's fields are its own parameters. When it passes one of them on to its base, as `Header` passes `Key` in [Unions](#unions), the value is written once, as the derived record's field.
+
+A record is its fields in order, each written as a value of its type would be. There is nothing before the first field, between two fields or after the last one. Field names, numbers and types are never written, so a reader must know the record's fields and their order.
+
+For these types:
+
+```text
+record Item(string Name, int Quantity, bool Done, double? Weight);
+record Empty();
+record Tagged(Empty Marker, int Value);
+record Pair(Empty First, Empty Second);
+```
+
+| Value | Bytes |
+| --- | --- |
+| `Item("Milk", 2, true, null)` | `04 4d 69 6c 6b 04 01 00` |
+| `Item("", -1, false, 1.5)` | `00 01 00 01 00 00 00 00 00 00 f8 3f` |
+| `Empty()` | No bytes |
+| `Pair(Empty(), Empty())` | No bytes |
+| `Tagged(Empty(), -1)` | `01` |
+| A present `Empty` as an `Empty?` | `01` |
+| A list of `Pair?`: present, absent | `02 01 00` |
+
+A field that is a record is that record's fields, in its place.
+
+A record is no bytes when all its fields are no bytes: a record with no fields, such as `Empty`, or one whose fields are all records that are no bytes, such as `Pair`. Every other value is at least one byte: a boolean, a number, an instant, a duration, a string, an enum, a list, a union and a nullable value each are, and so is a record with at least one field that is. A record that holds a value of its own type directly, not through a list, a nullable value or a union, has no value that ends, so it has no bytes for this rule to decide.
+
+So any type can be the item type of a list except a record that is no bytes, and every list item is at least one byte, as [Lists](#lists) requires. A record that is no bytes can be a field, as in `Tagged`. A nullable value of it is one byte, its presence byte, so it can be a list item, as in the list of `Pair?`.
+
+## Enums
+
+An enum is the index of its value, written as a variable-length integer. An enum's declared values are its named members. The index is a value's position among them, in the order they are declared, counting from 0, whatever their numbers. An enum's numeric values and the names of its values are never written.
+
+An enum has at least one declared value, and no two of its declared values have the same number. The contract rules forbid an enum with no members, an enum with an alias (a member with the same number as another, such as `B = A`), and a `[Flags]` enum. So each declared value has exactly one index.
+
+For `enum Priority { High = 10, Low = 5, Normal = 7 }`:
+
+| Value | Bytes |
+| --- | --- |
+| `High`, index 0 | `00` |
+| `Low`, index 1 | `01` |
+| `Normal`, index 2 | `02` |
+| An absent `Priority?` | `00` |
+| `Normal` as a `Priority?` | `01 02` |
+| A list of `Normal`, `High`, `Low`, `Normal` | `04 02 00 01 02` |
+| `High`, read from a longer form of index 0 | `80 00`, which a reader accepts; a writer writes `00` |
+
+An index of 128 or more takes two bytes or more: the value at index 128 of a larger enum is `80 01`.
+
+A value that is not exactly one declared value has no index: a number that no member has, such as `(Priority)8`, or a combination of members, such as `Priority.High | Priority.Low`, which is 15. A writer refuses it and writes nothing. In C#, an enum's codec throws `InvalidOperationException` for it, before it writes anything.
+
+A reader rejects an index that is not below the number of the enum's declared values. A writer never writes one. A reader accepts an index in a longer form than the shortest, as it does any variable-length integer.
+
+## Unions
+
+A union is a value of one of a fixed set of records, its cases. This page writes `union Screen = Loading() | Failed(string Message) | Ready(Point Origin, IReadOnlyList<int> Values)` for this C# shape, an abstract record with its cases nested in it:
+
+```csharp
+public abstract record Screen
+{
+    public sealed record Loading() : Screen;
+    public sealed record Failed(string Message) : Screen;
+    public sealed record Ready(Point Origin, IReadOnlyList<int> Values) : Screen;
+}
+```
+
+A union's cases are the records nested in its abstract record that derive from it, in the order they are declared there. A union has at least one case. A case's fields are the parameters of its own primary constructor, as for any record.
+
+A union is the index of its case, written as a variable-length integer, then that case's fields. The index is the case's position among the union's cases, counting from 0. The case's fields are written as a record's are: in order, with nothing before, between or after them. A case with no fields is its index alone. A union with one case still writes the index, which is always 0. Case names are never written.
+
+For these types:
+
+```text
+record Point(int X, int Y);
+union Screen = Loading() | Failed(string Message) | Ready(Point Origin, IReadOnlyList<int> Values);
+union Wrapper = Only(int Value);
+```
+
+| Value | Bytes |
+| --- | --- |
+| `Loading()` | `00` |
+| `Failed("x")` | `01 01 78` |
+| `Ready(Point(1, -1), [1, 3])` | `02 02 01 02 02 06` |
+| `Ready(Point(0, 0), [])` | `02 00 00 00` |
+| A list of `Screen`s: `Loading()`, `Loading()` | `02 00 00` |
+| An absent `Screen?` | `00` |
+| `Loading()` as a `Screen?` | `01 00` |
+| `Only(1)`, a `Wrapper` | `00 02` |
+
+The abstract record of a union can have parameters of its own, such as `Key` here:
+
+```csharp
+public abstract record Row(string Key)
+{
+    public sealed record Header(string Key, string Title) : Row(Key);
+    public sealed record Line(string Key, string Text) : Row(Key);
+}
+```
+
+The union's own parameters are not written. Each case's fields are its own parameters, so `Header`'s fields are `Key` and `Title`, and its `Key` is written once, as its first field: `Header("h", "Today")` is `00 01 68 05 54 6f 64 61 79`.
+
+A case is written only as part of its union, with its index. The contract rules forbid a case type on its own, as the type of a field, a list's items, a nullable value, a stream or a method's argument; the union goes there, or a separate record with the same fields. So the format gives a case type on its own no bytes.
+
+A reader rejects an index that is not below the number of the union's cases. A writer never writes one. A reader accepts an index in a longer form than the shortest: `80 00` is read as index 0, `Loading()`.
+
+Adding, removing or reordering a record's fields, an enum's values or a union's cases changes what existing bytes mean. That is why both sides of an app are generated together from one contract, and the contract hash checks that they were. The contract hash is a 64-bit hash of the contract's signature, which both sides carry and compare when a screen connects; [Architecture](architecture.md#the-wire-format-and-the-fixed-interface) describes it.
+
+In C#, `OahuWriter.WriteIndex` writes the index of an enum's value or a union's case, and `OahuReader.ReadIndex` reads it. Both take the number of the type's values or cases. `WriteIndex` throws `ArgumentOutOfRangeException` for an index that is negative or not below that number, and both throw it for a number below 1, since a type with no values or cases has no value to write. `ReadIndex` throws `OahuFormatException` for an index that is not below the number, so the codec that maps the index to its value or case never sees one out of range. An enum's codec calls only these. A union's codec calls `EnterNested`, then the index method, then reads or writes the case's fields, then calls `ExitNested`, as [Nesting depth](#nesting-depth) says.
+
 ## Nesting depth
 
-A record is its fields in order. A union is the index of its case, then that case's fields. A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, IReadOnlyList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
+A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, IReadOnlyList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
 
 A value's nesting depth is the number of record and union values that enclose it, counting itself if it is one. Records and unions count because they are the only kinds of value that can contain a value of their own type. Every record and union value counts, including a value of a record type that never contains itself. Lists, nullable values, enums, strings and primitive values do not add depth.
 
-A union value and the case it holds are one level, not two. In a contract a union's cases are records; the union value counts once, the record of its case is not counted again, and the case's fields are at the union's depth. A record type that is used both as a union case and on its own counts as a record when it is a field's value, and not again when it is the case of a union value.
+A union value and the case it holds are one level, not two. In a contract a union's cases are records; the union value counts once, the record of its case is not counted again, and the case's fields are at the union's depth. A case is never a value on its own, as [Unions](#unions) says, so a case record is always counted as part of its union.
 
 The largest nesting depth is 64. A value at depth 65 is not valid in the format. A writer refuses to write it, and a reader rejects it as malformed. Every implementation accepts depth 64 and rejects depth 65.
 
-For these types, written in a contract's notation:
+For these types, in the notation of [Records](#records) and [Unions](#unions):
 
 ```text
 record Point(double X, double Y);
 record Node(string Name, Point Origin, IReadOnlyList<Node> Children);
 record Folder(IReadOnlyList<Node>? Nodes);
 union Shape = Circle(Point Center, double Radius) | Group(IReadOnlyList<Shape> Shapes);
-record Badge(Circle Mark);
 ```
 
 | Value | Depth |
@@ -242,7 +361,6 @@ record Badge(Circle Mark);
 | The case a `Shape` holds, and that case's fields, such as a `Group`'s `Shapes` list | The `Shape`'s depth |
 | A `Shape` in the `Shapes` of a `Group`: a `Group` inside a `Group` | 2 |
 | A `Circle`'s `Center`: a record that is a field of a union's case | The `Shape`'s depth plus 1 |
-| The `Mark` of a `Badge`, a `Circle` that is a field's value, not a case | The `Badge`'s depth plus 1 |
 
 The limit exists for two reasons. Without it, a reader of a deeply nested value runs out of stack. On most platforms that ends the app with no error to catch, and the depth at which it happens differs with each platform's stack size. With the limit, every platform fails on the same values, with a message. The limit also bounds what a reader allocates, as [Lists](#lists) describes.
 
@@ -273,7 +391,9 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - A presence byte is neither `00` nor `01`, or the input ends before it.
 - A list's count is malformed in any of the ways a count is, above.
 - A list's count is larger than the number of bytes left after it.
-- An item of a list, or a present value, is malformed in any of the ways a value of its type is.
+- An item of a list, a present value, a field of a record or a field of a union's case is malformed in any of the ways a value of its type is.
+- An enum's or a union's index is malformed in any of the ways a variable-length integer is, above.
+- An enum's or a union's index is not below the number of the type's values or cases.
 - A record or union value is at nesting depth 65.
 - Bytes are left over after the message's value.
 

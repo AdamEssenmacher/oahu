@@ -143,6 +143,37 @@ public sealed class OahuWriter
         WriteVarUInt((ulong)count);
     }
 
+    /// <summary>
+    /// Writes the index of an enum's value or a union's case, as an unsigned variable-length integer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The codec of an enum writes its value as this index alone. The codec of a union calls
+    /// <see cref="EnterNested"/>, writes the index of its case with this method, writes that case's fields, then calls
+    /// <see cref="ExitNested"/>.
+    /// </para>
+    /// <para>
+    /// The index is the position of the value among the enum's declared values, or of the case among the union's
+    /// cases, in declaration order, counting from 0. It is not an enum value's numeric value, and an enum's numeric
+    /// values and names are never written. <paramref name="count"/> is the number of values or cases the type has, so
+    /// that the writer never writes an index that a reader of the type rejects. The call allocates nothing.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The index to write, from 0 to <paramref name="count"/> - 1.</param>
+    /// <param name="count">The number of values of the enum or cases of the union. It is at least 1.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="count"/> is less than 1, or <paramref name="index"/> is negative or not less than
+    /// <paramref name="count"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteIndex(int index, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, count);
+        WriteVarUInt((ulong)index);
+    }
+
     /// <summary>Writes <paramref name="value"/> as one byte: 0 for <see langword="false"/>, 1 for <see langword="true"/>.</summary>
     /// <param name="value">The value to write.</param>
     /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
