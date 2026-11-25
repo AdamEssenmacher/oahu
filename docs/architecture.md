@@ -48,9 +48,9 @@ Neither side is bound to the other by hand. Oahu binds one small, fixed interfac
 ```mermaid
 flowchart LR
     VM[View model] -->|sets a source| L[Loop]
-    L -->|later turn, coalesced| E[Exporter]
+    L -->|delivery turn| E[Exporter]
     E -->|bytes| P[Port]
-    P -->|fixed ABI| C[Connection]
+    P -->|fixed interface| C["Connection (the sink)"]
     C -->|decode, then apply| M[Model]
     M --> S[Screen]
     S -. calls a member .-> M
@@ -60,21 +60,24 @@ flowchart LR
 ```
 
 1. **Set.** A view model holds a **source** for each stream (`StateSource<T>`, `EditableSource<T>`, `EventSource<T>`, `KeyedListSource<T>`) and changes it. The source's current value changes at once. Setting a state or an editable to its current value publishes nothing. A state can also be **derived** from other sources, and then follows them.
-2. **Deliver.** The **loop** (`OahuLoop`) notifies observers in a later **turn** of the UI thread, meaning a later pass of its run loop, so a view model can change several sources and the screen sees them together. Several changes to one state within a turn arrive as one. Events are never merged. Sources deliver in the order they first changed in that turn.
+2. **Deliver.** The **loop** (`OahuLoop`) notifies observers in a later **delivery turn**, never while the code that changed the value is still running. A delivery turn is one drain of the loop's queue. The loop posts it to the UI thread, so it normally runs in a later pass of that thread's run loop; the one exception is the drain in the member call described below. A turn runs until the queue is empty, so a change an observer makes during a turn is delivered in that same turn. Within a turn, sources deliver in the order they first changed since the last turn. What an observer receives depends on the stream:
+   - A **state** or an **editable** delivers the value that is current when its delivery starts, and only if it differs from the last value that observer received. Several changes are one message. A change and its reversal are none.
+   - A **keyed list** delivers every operation applied since the observer's last delivery, in order, as one batch. No operation is dropped.
+   - **Events** are never merged. Each is delivered once.
 3. **Encode.** The exporter writes the value in the **wire format** and hands the bytes to the **port**, the C# object the native side holds.
-4. **Cross.** The port passes the stream's number, a pointer and a length to the screen's native **sink**. Each screen has one sink for all its streams. The bytes are valid only during the call. Nothing is retained and nothing is marshalled per field.
-5. **Apply.** The native **connection** decodes the whole message first and applies it to the model only if it decoded completely, so a bad message changes nothing. The toolkit's own observation then redraws the screen.
+4. **Cross.** The port passes the stream's number, a pointer and a length to the screen's native **sink**. Each screen has one sink for all its streams: its **connection**, the native object that sits between the port and the model. The bytes are valid only during the call. Nothing is retained and nothing is marshalled per field.
+5. **Apply.** The connection decodes the whole message first and applies it to the model only if it decoded completely, so the model is never left half-updated. A message that does not decode is a fault. The toolkit's own observation then redraws the screen.
 
-A member call takes the same path in reverse: the model encodes the argument, the port hands the bytes to the exporter, and the exporter decodes them and calls the view model. Everything that call changes, up to the method's first `await`, reaches the screen before the outermost native call returns. After its own action has returned, a screen does not show the state from before it. A call the screen makes while it is receiving a message is not outermost; what it changes arrives later in the same turn.
+A member call takes the same path in reverse: the model encodes the argument, the port hands the bytes to the exporter, and the exporter decodes them and calls the view model. Everything that call changes, up to the method's first `await`, reaches the screen before the outermost native call returns. After its own action has returned, a screen does not show the state from before it. This is the exception named in step 2: the exporter runs a delivery turn itself before the outermost native call returns, without waiting for the posted one. A call the screen makes while it is receiving a message is not outermost; what it changes is delivered later in the turn already running.
 
 When a screen subscribes, the current value of each state and editable, and the current content of each keyed list, arrives before the subscribe call returns. A screen is never drawn without its data.
 
 ## Other operations
 
-- **Edits.** When the screen edits an editable, the view model may accept the value, change it or refuse it. Whatever it settles on reaches the screen before the outermost edit call returns. An edit that has not settled by then is a fault.
+- **Edits.** A native model does not take an edited value for itself. It sends the edit and shows only what the view model publishes. The view model may accept the value, change it or refuse it, and must settle on one of these before its handler returns. An accepted or changed value is published, and reaches the screen before the outermost edit call returns. A refusal leaves the value as it was, so nothing is published and the screen goes on showing the value it already had. The exporter checks the settlement as far as it can see it, and a mismatch is a fault.
 - **Showing a screen.** A host shows a screen in one of two ways. As a **container**, it gets a platform view controller that holds the screen. As a **mount**, the view model is connected and registered under an ID, and the app's own native view hierarchy places it. A mounted screen is an ordinary view in that hierarchy, so native navigation, transitions and environment values work between Oahu screens as they do between any two views. Oahu has no navigation layer of its own.
-- **Teardown.** Closing a screen ends the native side first, then the exporter, then whatever the host owns for the view model. A `Task` method still running sees its cancellation token cancelled. Failures during teardown are collected and reported together; one failure does not stop the rest. A screen closed from inside a native call is torn down in the next turn.
-- **Failures and faults.** A method that throws, or whose `Task` fails or is cancelled, is a **failure**: it is reported to the host, and the app continues. The one exception is a cancellation that follows the screen's own close, which is expected and is not reported. A broken rule of the seam is a **fault**, such as a change made off the UI thread, bytes that do not decode, or an exception from an observer. Two rules hold in every runtime: a fault never unwinds across the bridge, and it is never swallowed, so the app ends. When the app ends depends on how the language stops. In C# and Kotlin a fault is an exception, which must not cross native frames: the runtime catches it, the host reports it, and the app ends on the next turn of the UI thread. In Swift a fault stops the process where it is detected, without unwinding. A Swift fault can be detected inside a call from C#, as when a message does not decode, and then the host does not get to report it.
+- **Teardown.** Closing a screen ends the native side first, then the exporter, then whatever the host owns for the view model. A `Task` method still running sees its cancellation token cancelled. Failures during teardown are collected and reported together; one failure does not stop the rest. A screen closed from inside a native call is torn down in a later pass of the UI thread's run loop.
+- **Failures and faults.** A method that throws, or whose `Task` fails or is cancelled, is a **failure**: it is reported to the host, and the app continues. The one exception is a cancellation that follows the screen's own close, which is expected and is not reported. A broken rule of the seam is a **fault**, such as a change made off the UI thread, bytes that do not decode, or an exception from an observer. Two rules hold in every runtime: a fault never unwinds across the bridge, and it is never swallowed, so the app ends. When the app ends depends on how the language stops. In C# and Kotlin a fault is an exception, which must not cross native frames: the core catches it, reports it once, and posts the end of the app to the UI thread through the host, for the next pass of the run loop. In Swift a fault stops the process where it is detected, without unwinding. A Swift fault can be detected inside a call from C#, as when a message does not decode, and then nothing on the C# side gets to report it.
 
 ## The wire format and the fixed interface
 
@@ -92,7 +95,7 @@ The **fixed interface** is the only thing Oahu binds between .NET and native cod
 | Protocol | Implemented by | Does |
 | --- | --- | --- |
 | Port | C# | Takes the screen's sink, subscribes and unsubscribes a stream, runs a member |
-| Sink | Native | Receives each message, with the number of the stream it belongs to |
+| Sink | Native, the connection | Receives each message, with the number of the stream it belongs to |
 | Screen provider | Native, generated | Reports the contract hash it was generated for, and creates the screen for a port |
 | Screen handle | Native | Holds the created screen and closes it |
 
@@ -144,7 +147,7 @@ A host **must**:
 - connect a screen only through the core's hosting surface, which makes the contract check;
 - call the exporter only on the UI thread, and deliver each message to the native side within the call that carries it;
 - tear down in order: the native screen, then the exporter, then what it owns for the view model;
-- report every failure and fault it is handed, and end the app on a fault.
+- run on the UI thread what the core posts to it, including the end of the app after a fault, and pass on every failure and fault the core reports.
 
 A host **must not**:
 
@@ -155,10 +158,10 @@ A host **must not**:
 ## Invariants
 
 - **One thread.** Sources, exporters, ports, connections and models are used only on the UI thread. A change from another thread is a fault and changes nothing.
-- **Current is now; notification is later.** A source's value changes when it is set. Observers hear about it in a later turn, in the order sources first changed in that turn.
+- **Current is now; notification is later.** A source's value changes when it is set. Observers hear about it in a later delivery turn, in the order sources first changed since the last turn. A turn is posted to the UI thread, except that the exporter runs one before an outermost native call returns.
 - **A native call returns to a settled screen.** What a member call changes, up to its first `await`, is delivered before the outermost native call returns.
 - **Subscription replays synchronously.** State, editables and keyed lists arrive before the subscribe call returns. Events are never replayed.
-- **Decode, then apply.** A message that does not decode completely changes nothing.
+- **Decode, then apply.** A model is never left half-updated. A message that does not decode completely changes nothing and is a fault.
 - **Lockstep contracts.** A screen connects only to an exporter with the same contract hash, and the core makes that check.
 - **Bytes live for one call.** Neither side holds a message's bytes after the call that carried them.
 - **View models are screen-blind.** Nothing in a contract or the runtime tells a view model whether its screen is attached, visible or covered.
