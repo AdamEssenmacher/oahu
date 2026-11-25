@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/core/">
+    <Project Path="src/core/AdamE.Oahu/AdamE.Oahu.csproj" />
+  </Folder>
+</Solution>
