@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers and doubles.
+This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles and strings.
 
 ## Messages
 
@@ -91,6 +91,42 @@ Every bit pattern is a valid double. A writer writes the bits of the value it is
 
 A NaN is written and read with its bits unchanged too. But a language runtime may quieten a signalling NaN before the writer ever sees it. So the format does not promise that a NaN's payload survives from one side of an app to the other, and nothing should depend on it.
 
+## Strings
+
+A string is its length as a count, then that many bytes of UTF-8. The length is the number of UTF-8 bytes, not the number of characters. There is no terminator and no byte-order mark.
+
+| Value | Bytes |
+| --- | --- |
+| The empty string | `00` |
+| `Milk` | `04 4d 69 6c 6b` |
+| `é` (U+00E9) | `02 c3 a9` |
+| `€` (U+20AC) | `03 e2 82 ac` |
+| `😀` (U+1F600) | `04 f0 9f 98 80` |
+| U+10FFFF, the highest code point | `04 f4 8f bf bf` |
+| `a`, U+0000, `b` | `03 61 00 62` |
+| U+FEFF | `03 ef bb bf` |
+| 128 `a` characters | `80 01`, then 128 bytes of `61` |
+| 64 `é` characters | `80 01`, then 64 pairs of `c3 a9` |
+
+U+0000 and U+FEFF are ordinary characters. A reader keeps a U+FEFF at the start of a string; it is not taken as a byte-order mark.
+
+The bytes of a string are always well-formed UTF-8 as the Unicode standard defines it.
+
+A writer writes every string, even one that is not well-formed UTF-16. It writes each lone surrogate as U+FFFD, the bytes `ef bf bd`. A lone surrogate is a high surrogate that no low surrogate follows, or a low surrogate that no high surrogate comes before; a low surrogate followed by a high one is two lone surrogates, written as two U+FFFD. The length counts the three bytes of each U+FFFD. The reason: a string cut in the middle of a character should show one replacement character on the screen, not end the app. The string the reader produces then differs from the writer's string in that character: it has U+FFFD where the writer's string had the lone surrogate.
+
+| Value | Bytes |
+| --- | --- |
+| A lone high surrogate, U+D800 | `03 ef bf bd` |
+| A lone low surrogate, U+DC00 | `03 ef bf bd` |
+| U+DC00, then U+D800 | `06 ef bf bd ef bf bd` |
+| `a`, U+D800, `b` | `05 61 ef bf bd 62` |
+
+A reader is strict. It rejects a string whose bytes are not well-formed UTF-8 and never replaces anything with U+FFFD. A U+FFFD it reads is the three bytes `ef bf bd` in the input, like any other character.
+
+In C#, `OahuWriter.WriteString` throws `ArgumentNullException` for `null`. A string's UTF-8 bytes, its length and the bytes written before it must fit in the writer's buffer, which holds at most `Array.MaxLength` bytes; beyond that, the writer throws `InvalidOperationException` and writes nothing. That limit is below the largest count, so a string the writer writes always has a valid length.
+
+Notes for implementers. On the JVM, the default conversions do not follow these rules: `String.getBytes(UTF_8)` writes `?` for a lone surrogate, and `String(bytes, UTF_8)` silently replaces ill-formed bytes with U+FFFD. So a Kotlin codec must encode with a `CharsetEncoder` set to replace malformed input with the bytes `ef bf bd`, and decode with a `CharsetDecoder` set to report errors. A Swift string cannot hold a lone surrogate, so a Swift writer has nothing to replace. A Swift reader must not decode through a NUL-terminated C string, because U+0000 is an ordinary character.
+
 ## Malformed input
 
 A reader rejects input that is not in the format. It never guesses at a value or skips bytes. Each of these makes a message malformed:
@@ -103,6 +139,8 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - An `int` or a `long` is malformed in any of the ways a variable-length integer is, above.
 - An `int`'s zigzag value is larger than 4,294,967,295, so the value does not fit in 32 bits.
 - The input ends before a boolean, or inside a double.
+- A string's length is larger than the number of bytes left after it.
+- A string's bytes are not well-formed UTF-8. This includes an overlong form, such as `c0 af` for `/`; an encoded surrogate, U+D800 to U+DFFF, such as `ed a0 80`; a code point above U+10FFFF, such as `f4 90 80 80`; a sequence cut short, such as `e2 82` at the end of the string or `c3 28`; a continuation byte (`80` to `bf`) that no lead byte comes before; and the bytes `c0`, `c1` and `f5` to `ff`, which never appear in UTF-8.
 - Bytes are left over after the message's value.
 
-In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
+In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.

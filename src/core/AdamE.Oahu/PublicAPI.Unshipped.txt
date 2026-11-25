@@ -10,6 +10,7 @@ AdamE.Oahu.Wire.OahuReader.ReadCount() -> int
 AdamE.Oahu.Wire.OahuReader.ReadDouble() -> double
 AdamE.Oahu.Wire.OahuReader.ReadInt() -> int
 AdamE.Oahu.Wire.OahuReader.ReadLong() -> long
+AdamE.Oahu.Wire.OahuReader.ReadString() -> string!
 AdamE.Oahu.Wire.OahuReader.ReadVarUInt() -> ulong
 AdamE.Oahu.Wire.OahuReader.Remaining.get -> int
 AdamE.Oahu.Wire.OahuWriter
@@ -21,6 +22,7 @@ AdamE.Oahu.Wire.OahuWriter.WriteCount(int count) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteDouble(double value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInt(int value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteLong(long value) -> void
+AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
 AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
 AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>

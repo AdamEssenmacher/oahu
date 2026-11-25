@@ -1,5 +1,8 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Numerics;
+using System.Text.Unicode;
 
 namespace AdamE.Oahu.Wire;
 
@@ -12,6 +15,13 @@ namespace AdamE.Oahu.Wire;
 public sealed class OahuWriter
 {
     private const int DefaultCapacity = 256;
+
+    private static readonly SearchValues<char> AsciiChars =
+        SearchValues.Create(string.Create(128, 0, static (chars, _) =>
+        {
+            for (var i = 0; i < chars.Length; i++)
+                chars[i] = (char)i;
+        }));
 
     private byte[] _buffer;
     private int _count;
@@ -52,15 +62,7 @@ public sealed class OahuWriter
     public void WriteVarUInt(ulong value)
     {
         var size = VarUIntSize(value);
-        var span = Reserve(size);
-        var i = 0;
-        while (value >= 0x80)
-        {
-            span[i++] = (byte)(value | 0x80);
-            value >>= 7;
-        }
-
-        span[i] = (byte)value;
+        WriteVarUInt(Reserve(size), value);
     }
 
     /// <summary>Writes a count, such as a length or a number of items, as an unsigned variable-length integer.</summary>
@@ -105,18 +107,118 @@ public sealed class OahuWriter
     public void WriteDouble(double value) =>
         BinaryPrimitives.WriteInt64LittleEndian(Reserve(sizeof(double)), BitConverter.DoubleToInt64Bits(value));
 
+    /// <summary>
+    /// Writes <paramref name="value"/> as its UTF-8 byte length, written as a count, followed by its UTF-8 bytes.
+    /// </summary>
+    /// <remarks>
+    /// The length is in bytes, not characters. No terminator or byte-order mark is added, and U+0000 and U+FEFF are
+    /// written as ordinary characters. A string that is not well-formed UTF-16 is still written: each lone surrogate,
+    /// a high surrogate that no low surrogate follows or a low surrogate that no high surrogate comes before, is
+    /// written as U+FFFD, the bytes <c>ef bf bd</c>. So the bytes are always well-formed UTF-8, and the length counts
+    /// three bytes for each replaced surrogate. A string cut in the middle of a character then shows one replacement
+    /// character instead of ending the app. The string's UTF-8 bytes, with its length and the bytes written before it,
+    /// must fit in <see cref="Array.MaxLength"/> bytes, which also keeps the length within the largest count; a write
+    /// that does not fit throws and leaves the writer as it was.
+    /// </remarks>
+    /// <param name="value">The string to write.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteString(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        // Each UTF-16 char takes 1 to 3 UTF-8 bytes: a char below U+0800 takes 1 or 2, any other char outside a pair
+        // takes 3, a lone surrogate included, since it becomes the three bytes of U+FFFD, and a pair's two chars take
+        // 4. So the byte length is from value.Length to three times that. When both bounds take the same number of
+        // length bytes and the larger fits in the buffer, the string is encoded once, straight after the length.
+        // Otherwise its exact byte length is counted first.
+        var maxByteCount = (long)value.Length * 3;
+        var prefixSize = VarUIntSize((ulong)value.Length);
+        long byteCapacity;
+        if (prefixSize == VarUIntSize((ulong)maxByteCount) && _count + prefixSize + maxByteCount <= _buffer.Length)
+        {
+            byteCapacity = maxByteCount;
+        }
+        else
+        {
+            byteCapacity = Utf8ByteCount(value);
+            prefixSize = VarUIntSize((ulong)byteCapacity);
+            EnsureCapacity(_count + prefixSize + byteCapacity);
+        }
+
+        var destination = _buffer.AsSpan(_count + prefixSize, (int)byteCapacity);
+        var status = Utf8.FromUtf16(value, destination, out _, out var bytesWritten, replaceInvalidSequences: true);
+
+        Debug.Assert(status == OperationStatus.Done);
+        Debug.Assert(VarUIntSize((ulong)bytesWritten) == prefixSize);
+        WriteVarUInt(_buffer.AsSpan(_count, prefixSize), (ulong)bytesWritten);
+        _count += prefixSize + bytesWritten;
+    }
+
     // Seven value bits per byte; zero still takes one byte.
     private static int VarUIntSize(ulong value) => (70 - BitOperations.LeadingZeroCount(value | 1)) / 7;
 
+    private static void WriteVarUInt(Span<byte> span, ulong value)
+    {
+        var i = 0;
+        while (value >= 0x80)
+        {
+            span[i++] = (byte)(value | 0x80);
+            value >>= 7;
+        }
+
+        span[i] = (byte)value;
+    }
+
+    // The number of UTF-8 bytes WriteString writes for value: 1, 2 or 3 for each char outside a pair, a lone surrogate
+    // counted as the three bytes of U+FFFD, and 4 for each well-formed pair. Counted as a long because the bytes of a
+    // string can exceed int range. A vectorized search skips the leading ASCII chars, then the rest is counted a char
+    // at a time. Nothing is allocated. The search uses SearchValues because IndexOfAnyExceptInRange allocates before
+    // the JIT optimizes it.
+    internal static long Utf8ByteCount(ReadOnlySpan<char> value)
+    {
+        var firstNonAscii = value.IndexOfAnyExcept(AsciiChars);
+        if (firstNonAscii < 0)
+            return value.Length;
+
+        long count = firstNonAscii;
+        for (var i = firstNonAscii; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (c < 0x80)
+            {
+                count += 1;
+            }
+            else if (c < 0x800)
+            {
+                count += 2;
+            }
+            else if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                count += 4;
+                i++;
+            }
+            else
+            {
+                count += 3;
+            }
+        }
+
+        return count;
+    }
+
     private Span<byte> Reserve(int size)
     {
-        var required = (long)_count + size;
-        if (required > _buffer.Length)
-            Grow(required);
-
+        EnsureCapacity((long)_count + size);
         var span = _buffer.AsSpan(_count, size);
         _count += size;
         return span;
+    }
+
+    private void EnsureCapacity(long required)
+    {
+        if (required > _buffer.Length)
+            Grow(required);
     }
 
     private void Grow(long required)
