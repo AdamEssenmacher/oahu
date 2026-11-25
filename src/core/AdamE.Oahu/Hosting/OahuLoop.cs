@@ -349,10 +349,13 @@ public sealed class OahuLoop : IDisposable
     internal void RaiseFault(Exception fault)
     {
         ArgumentNullException.ThrowIfNull(fault);
+        // Faulted first, then the table: a second raise of the same instance, on another thread, returns early from the
+        // table, and the loop must already be faulted by then. Every exception in the table is a fault of this loop, so
+        // setting the bit for one that turns out to be reported already changes nothing.
+        Interlocked.Or(ref _state, Faulted);
         if (!_reported.TryAdd(fault, s_reportedMark))
             return;
 
-        Interlocked.Or(ref _state, Faulted);
         try
         {
             Report(fault);
