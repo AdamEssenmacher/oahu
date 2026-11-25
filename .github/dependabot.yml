@@ -1,0 +1,32 @@
+version: 2
+
+# The .NET SDK is deliberately not updated here. global.json sets a minimum with
+# `rollForward: latestFeature`, and CI installs the newest SDK that setting allows on
+# every run, so servicing releases arrive without raising the minimum contributors need.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week after a release before proposing it.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      nuget:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
