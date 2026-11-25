@@ -619,12 +619,18 @@ public sealed class StringTests
 
         static string LongText(int bytes)
         {
+            // The chunk is 15 bytes of UTF-8 and an 'x' is 1, so the byte count is tracked, not measured again.
+            const string chunk = "ab é € 😀 ";
+            const int chunkBytes = 15;
             var text = new StringBuilder();
-            while (Encoding.UTF8.GetByteCount(text.ToString()) + 15 <= bytes)
-                text.Append("ab é € 😀 ");
-            while (Encoding.UTF8.GetByteCount(text.ToString()) < bytes)
-                text.Append('x');
-            return text.ToString();
+            var written = 0;
+            for (; written + chunkBytes <= bytes; written += chunkBytes)
+                text.Append(chunk);
+            text.Append('x', bytes - written);
+
+            var result = text.ToString();
+            Assert.Equal(bytes, Encoding.UTF8.GetByteCount(result));
+            return result;
         }
     }
 
