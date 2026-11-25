@@ -15,7 +15,9 @@ namespace AdamE.Oahu;
 /// Events are never merged. Two occurrences are two deliveries, even when their values are equal.
 /// </para>
 /// <para>
-/// Observers hear of an occurrence in a later delivery turn, never while the code that published it is still running.
+/// Observers hear of an occurrence in a later delivery turn, never during the call that published it: no observer
+/// runs while that call is on the stack. A turn can run before the method that published it has finished, when that
+/// method is waiting at an <see langword="await"/>.
 /// </para>
 /// <para>
 /// Disposing a subscription stops all delivery to it at once, even later in a delivery turn that is already running,
@@ -27,8 +29,9 @@ namespace AdamE.Oahu;
 /// </para>
 /// <para>
 /// A stream of events is used only on the UI thread: observers subscribe and dispose their subscriptions there, and
-/// occurrences are delivered there. Using a stream of events on another thread is a mistake. How Oahu reports it is
-/// specified with the sources; a change made off the UI thread is a fault.
+/// occurrences are delivered there. Publishing an occurrence on
+/// another thread is a fault. Subscribing or disposing a subscription on another thread is a mistake too; whether
+/// Oahu reports it as a fault is specified with the sources, so an implementation must not rely on it being allowed.
 /// </para>
 /// <para>
 /// An exception thrown by an observer is a fault. The details arrive with the sources.

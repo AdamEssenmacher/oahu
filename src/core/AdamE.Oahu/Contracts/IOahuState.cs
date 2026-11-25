@@ -13,10 +13,14 @@ namespace AdamE.Oahu;
 /// <para>
 /// A new observer receives the current value at once, during <see cref="IObservable{T}.Subscribe"/>, before that call
 /// returns. Then, in later delivery turns, it receives the value current at that time, when it differs from the last
-/// one that observer received. Contract values compare by structure.
+/// one that observer received. Contract values compare by structure. For a list, that takes Oahu's own comparison,
+/// which arrives with structural equality in a later part of the vocabulary: the default comparer compares two lists
+/// by reference, so an implementation that uses it delivers an equal list again.
 /// </para>
 /// <para>
-/// Observers hear of a change in a later delivery turn, never while the code that changed the value is still running.
+/// Observers hear of a change in a later delivery turn, never during the call that changed the value: no observer
+/// runs while that call is on the stack. A turn can run before the method that made the change has finished, when
+/// that method is waiting at an <see langword="await"/>.
 /// So several changes before a turn can reach an observer as one value, and a change and its reversal as none.
 /// </para>
 /// <para>
@@ -29,8 +33,10 @@ namespace AdamE.Oahu;
 /// </para>
 /// <para>
 /// A state is used only on the UI thread: <see cref="Current"/> is read there, observers subscribe and dispose their
-/// subscriptions there, and values are delivered there. Using a state on another thread is a mistake. How Oahu reports
-/// it is specified with the sources; a change made off the UI thread is a fault.
+/// subscriptions there, and values are delivered there. Changing a state's value on another
+/// thread is a fault. Reading <see cref="Current"/>, subscribing or disposing a subscription on another thread is a
+/// mistake too; whether Oahu reports it as a fault is specified with the sources, so an implementation must not
+/// rely on it being allowed.
 /// </para>
 /// <para>
 /// An exception thrown by an observer is a fault. The details arrive with the sources.

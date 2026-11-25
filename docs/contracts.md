@@ -23,8 +23,8 @@ The vocabulary has two kinds of stream so far. The rules below are requirements 
 **State** (`IOahuState<T>`) is a value that always has a current one: a title, a count, the status of a download. Use it for anything the screen draws from.
 
 - `Current` is the value now. When the view model changes it, `Current` changes at once.
-- A new observer receives the current value at once, during `Subscribe`. Then, in later delivery turns, it receives the value current at that time, when it differs from the last one that observer received. Contract values compare by structure.
-- Observers hear of a change in a later delivery turn, not while the code that changed it is running. So several changes before a turn can arrive as one value, and a change and its reversal as none.
+- A new observer receives the current value at once, during `Subscribe`. Then, in later delivery turns, it receives the value current at that time, when it differs from the last one that observer received. Contract values compare by structure. For a list, that takes Oahu's own comparison, which arrives with structural equality in a later part of the vocabulary: the default comparer compares two lists by reference, so an implementation that uses it delivers an equal list again.
+- Observers hear of a change in a later delivery turn, never during the call that changed it: no observer runs while that call is on the stack. A turn can run before the method that made the change has finished, when that method is waiting at an `await`. So several changes before a turn can arrive as one value, and a change and its reversal as none.
 - A state never completes and never fails.
 
 **Events** (`IOahuEvents<T>`) are occurrences with no current value: a message to show once, a sound to play. Use them for what happens, not for what is.
@@ -37,7 +37,7 @@ The vocabulary has two kinds of stream so far. The rules below are requirements 
 Both kinds of stream follow these rules too:
 
 - **Disposal.** Disposing a subscription stops all delivery to it at once, even later in a delivery turn that is already running, and even when the observer disposes it during its own callback. Disposing it again does nothing.
-- **One thread.** A stream is used only on the UI thread: `Current` is read there, observers subscribe and dispose their subscriptions there, and values are delivered there. Using a stream on another thread is a mistake. How Oahu reports it is specified with the sources; the [architecture](architecture.md#invariants) already says that a change made off the UI thread is a fault.
+- **One thread.** A stream is used only on the UI thread: `Current` is read there, observers subscribe and dispose their subscriptions there, and values are delivered there. Changing a state's value or publishing an occurrence on another thread is a fault, as the [architecture](architecture.md#invariants) says. Reading `Current`, subscribing or disposing a subscription on another thread is a mistake too; whether Oahu reports it as a fault is specified with the sources, so an implementation must not rely on it being allowed.
 - **Observer exceptions.** An exception thrown by an observer is a fault, as the [architecture](architecture.md#other-operations) says. The details arrive with the sources.
 
 The [architecture](architecture.md#the-path-of-one-change) describes delivery turns and the loop that runs them.
