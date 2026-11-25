@@ -8,7 +8,7 @@ public sealed class ListOpTests
 
     public sealed record NoteRow(string Key) : IOahuKeyed;
 
-    public sealed record TagsRow(string Key, IReadOnlyList<string> Tags) : IOahuKeyed;
+    public sealed record TagsRow(string Key, OahuList<string> Tags) : IOahuKeyed;
 
     private static readonly TaskRow Milk = new("t0", "Milk", false);
     private static readonly TaskRow Bread = new("t1", "Bread", false);
@@ -140,15 +140,16 @@ public sealed class ListOpTests
     }
 
     [Fact]
-    public void Operations_whose_rows_hold_different_list_instances_are_not_equal()
+    public void Operations_whose_rows_hold_different_but_equal_lists_are_equal()
     {
-        // Pins C# record equality: the default comparer compares a list field by reference, so rows equal by
-        // structure are not equal when they hold different lists. Structural equality comes later.
+        // A row's list field is an OahuList, which compares by its items, so C# record equality compares rows, and the
+        // operations that hold them, all the way down.
         var first = new TagsRow("k", ["home"]);
         var second = new TagsRow("k", ["home"]);
 
-        Assert.NotEqual(new ListOp<TagsRow>.Insert(0, first), new ListOp<TagsRow>.Insert(0, second));
-        Assert.Equal(new ListOp<TagsRow>.Insert(0, first), new ListOp<TagsRow>.Insert(0, first with { }));
+        Assert.Equal(new ListOp<TagsRow>.Insert(0, first), new ListOp<TagsRow>.Insert(0, second));
+        Assert.Equal(new ListOp<TagsRow>.Insert(0, first).GetHashCode(), new ListOp<TagsRow>.Insert(0, second).GetHashCode());
+        Assert.NotEqual(new ListOp<TagsRow>.Insert(0, first), new ListOp<TagsRow>.Insert(0, new TagsRow("k", ["work"])));
     }
 
     [Fact]

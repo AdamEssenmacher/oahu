@@ -42,7 +42,7 @@ internal static class VectorCodec
                     Write(writer, nullable.Inner, value);
                 break;
             case ListType list:
-                var items = (value as JsonArray ?? throw new InvalidDataException("A list is not an array.")).ToArray();
+                var items = (value as JsonArray ?? throw new InvalidDataException("A list is not an array.")).ToOahuList();
                 writer.WriteList(items, (w, item) => Write(w, list.Item, item));
                 break;
             case RecordType record:

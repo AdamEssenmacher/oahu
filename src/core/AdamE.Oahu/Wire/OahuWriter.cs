@@ -292,17 +292,18 @@ public sealed class OahuWriter
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every item must take at least one byte, because a reader rejects a count larger than the bytes that remain after
-    /// it. Items can be of any kind, including lists and nullable values. The list must not change while it is written.
+    /// The list is an <see cref="OahuList{T}"/>, the list of a contract value, and it is passed without boxing. It is
+    /// immutable, so its count and items cannot change while it is written. Every item must take at least one byte,
+    /// because a reader rejects a count larger than the bytes that remain after it. Items can be of any kind, including
+    /// lists and nullable values.
     /// </para>
     /// <para>
     /// Pass a method group of a static method or a <see langword="static"/> lambda for <paramref name="writeItem"/>, so
     /// that the delegate is created once and cached. The method itself allocates nothing.
     /// </para>
     /// <para>
-    /// <see cref="IReadOnlyCollection{T}.Count"/> is read once, before the count is written, and that many items are
-    /// written. After the items, the method checks that they wrote at least as many bytes as there are items, so that a
-    /// reader accepts the count. It does not check each item on its own.
+    /// After the items, the method checks that they wrote at least as many bytes as there are items, so that a reader
+    /// accepts the count. It does not check each item on its own.
     /// </para>
     /// <para>
     /// <paramref name="writeItem"/> must not call <see cref="Reset"/>, because that would remove the list's count and
@@ -316,36 +317,33 @@ public sealed class OahuWriter
     /// deep.
     /// </para>
     /// <para>
-    /// A <see langword="null"/> argument throws before anything is written. If <paramref name="writeItem"/> throws, the
-    /// writer was reset, an item changed the depth, or the items wrote fewer bytes than there are items, the exception
-    /// propagates and the writer's contents are unspecified: call <see cref="Reset"/> before writing another message.
+    /// A <see langword="null"/> <paramref name="writeItem"/> throws before anything is written. If
+    /// <paramref name="writeItem"/> throws, the writer was reset, an item changed the depth, or the items wrote fewer
+    /// bytes than there are items, the exception propagates and the writer's contents are unspecified: call
+    /// <see cref="Reset"/> before writing another message.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The type of the items.</typeparam>
     /// <param name="items">The items to write.</param>
     /// <param name="writeItem">Writes one item to the writer it is given.</param>
-    /// <exception cref="ArgumentNullException">
-    /// <paramref name="items"/> or <paramref name="writeItem"/> is <see langword="null"/>.
-    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="writeItem"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
     /// The message would be longer than <see cref="Array.MaxLength"/> bytes, <paramref name="writeItem"/> reset the
     /// writer, an item left the nesting depth different from what it was before it, or the items wrote fewer bytes than
     /// there are items.
     /// </exception>
-    public void WriteList<T>(IReadOnlyList<T> items, Action<OahuWriter, T> writeItem)
+    public void WriteList<T>(OahuList<T> items, Action<OahuWriter, T> writeItem)
     {
-        ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(writeItem);
 
-        // Indexing, not foreach, so that no enumerator is boxed.
-        var count = items.Count;
-        WriteCount(count);
+        var span = items.AsSpan();
+        WriteCount(span.Length);
         var itemsStart = _count;
         var resets = _resets;
         var depth = _depth;
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < span.Length; i++)
         {
-            writeItem(this, items[i]);
+            writeItem(this, span[i]);
 
             // Both checks run after each item, so that an item that enters without exiting is reported here rather
             // than reaching the depth limit within the list and being reported as a too-deep value. A reset followed
@@ -365,10 +363,10 @@ public sealed class OahuWriter
         // One check per list. It guarantees that a reader's count check passes, but it does not prove that each item
         // wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make up for it.
         var itemBytes = _count - itemsStart;
-        if (itemBytes < count)
+        if (itemBytes < span.Length)
         {
             throw new InvalidOperationException(
-                $"The list's {count} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
+                $"The list's {span.Length} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
                 "Every item must write at least one byte.");
         }
     }

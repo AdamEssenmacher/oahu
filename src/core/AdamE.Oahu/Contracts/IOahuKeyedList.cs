@@ -46,7 +46,9 @@ namespace AdamE.Oahu;
 /// </para>
 /// <para>
 /// A delivered batch never changes afterwards, contains no <see langword="null"/> operation, and may be one list
-/// instance shared by several observers, so an observer must not try to change it.
+/// instance shared by several observers, so an observer must not try to change it. A batch is an
+/// <see cref="IReadOnlyList{T}"/>, not an <see cref="OahuList{T}"/>, because, like the keyed list, it is not a contract
+/// value: the implementation chooses its storage, and keeping it unchanged is the implementation's duty.
 /// </para>
 /// <para>
 /// Observers hear of a change in a later delivery turn, never during the call that changed the list: no observer runs
@@ -93,8 +95,15 @@ public interface IOahuKeyedList<T> : IObservable<IReadOnlyList<ListOp<T>>>
     /// change. No two of its rows have the same key.
     /// </para>
     /// <para>
-    /// A list it returned does not change afterwards: a later change gives a new list, as contract values are
-    /// immutable.
+    /// A list it returned does not change afterwards: a later change gives a new list.
+    /// </para>
+    /// <para>
+    /// It is an <see cref="IReadOnlyList{T}"/>, not an <see cref="OahuList{T}"/>, because a keyed list is not a contract
+    /// value: it changes by operations, and this is a read-only view of its content now. The implementation chooses
+    /// the storage behind it, so a source of many rows can keep a persistent list and not copy every row on every
+    /// change. So the rule that a list it returned never changes is the implementation's duty, not something the type
+    /// enforces. The rows themselves, and any list inside a row, are contract values, and such a list is an
+    /// <see cref="OahuList{T}"/>.
     /// </para>
     /// </remarks>
     IReadOnlyList<T> Items { get; }

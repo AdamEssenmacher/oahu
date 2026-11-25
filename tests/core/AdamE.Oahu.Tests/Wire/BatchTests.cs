@@ -744,7 +744,7 @@ public sealed class BatchTests
     }
 
     // A row that holds rows of its own type, so that a value of it can nest as deep as the input says.
-    public sealed record NodeRow(string Key, IReadOnlyList<NodeRow> Children) : IOahuKeyed
+    public sealed record NodeRow(string Key, OahuList<NodeRow> Children) : IOahuKeyed
     {
         public int Depth => 1 + (Children.Count == 0 ? 0 : Children.Max(child => child.Depth));
 

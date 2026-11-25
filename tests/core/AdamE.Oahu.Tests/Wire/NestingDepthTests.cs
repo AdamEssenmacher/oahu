@@ -197,7 +197,7 @@ public sealed class NestingDepthTests
             children[i] = new Tree(i.ToString(CultureInfo.InvariantCulture), []);
 
         var writer = new OahuWriter();
-        Tree.Write(writer, new Tree("root", children));
+        Tree.Write(writer, new Tree("root", children.ToOahuList()));
 
         var reader = new OahuReader(writer.WrittenSpan);
         var read = Tree.Read(ref reader);
@@ -307,7 +307,7 @@ public sealed class NestingDepthTests
     {
         // A flat list of 70 items: more items than the largest depth.
         var writer = new OahuWriter();
-        var items = Enumerable.Range(0, 70).ToArray();
+        var items = Enumerable.Range(0, 70).ToOahuList();
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
             writer.WriteList(items, static (w, item) =>
@@ -630,11 +630,11 @@ public sealed class NestingDepthTests
 
     // A record with a name and a list of itself, with the codec a generator would write for it. A class, not a record,
     // so that nothing compares or prints a deep value recursively.
-    private sealed class Tree(string name, IReadOnlyList<Tree> children)
+    private sealed class Tree(string name, OahuList<Tree> children)
     {
         public string Name { get; } = name;
 
-        public IReadOnlyList<Tree> Children { get; } = children;
+        public OahuList<Tree> Children { get; } = children;
 
         public static void Write(OahuWriter writer, Tree tree)
         {
@@ -739,23 +739,23 @@ public sealed class NestingDepthTests
     {
         private const int CaseCount = 3;
 
-        private Shape(int caseIndex, IReadOnlyList<Shape> shapes, Shape? inner)
+        private Shape(int caseIndex, OahuList<Shape> shapes, Shape? inner)
         {
             CaseIndex = caseIndex;
             Shapes = shapes;
             Inner = inner;
         }
 
-        // 0 is Leaf(), 1 is Group(IReadOnlyList<Shape> Shapes) and 2 is Wrap(Shape? Inner).
+        // 0 is Leaf(), 1 is Group(OahuList<Shape> Shapes) and 2 is Wrap(Shape? Inner).
         public int CaseIndex { get; }
 
-        public IReadOnlyList<Shape> Shapes { get; }
+        public OahuList<Shape> Shapes { get; }
 
         public Shape? Inner { get; }
 
         public static Shape Leaf() => new(0, [], null);
 
-        public static Shape Group(IReadOnlyList<Shape> shapes) => new(1, shapes, null);
+        public static Shape Group(OahuList<Shape> shapes) => new(1, shapes, null);
 
         public static Shape Wrap(Shape? inner) => new(2, [], inner);
 
@@ -832,13 +832,13 @@ public sealed class NestingDepthTests
 
     // A record with a list of nullable values of itself and a nullable value of itself, so that a value can nest
     // through a list and a nullable value in turn, with the codec a generator would write for it.
-    private sealed class Knot(IReadOnlyList<Knot?> items, Knot? next)
+    private sealed class Knot(OahuList<Knot?> items, Knot? next)
     {
         // An odd level is a list count of two, an absent item and a present one: three bytes before the next level.
         // An even level is an empty list and a present next value: two bytes. So the 65th value starts at 32 × 5.
         public const int TooDeepOffset = 160;
 
-        public IReadOnlyList<Knot?> Items { get; } = items;
+        public OahuList<Knot?> Items { get; } = items;
 
         public Knot? Next { get; } = next;
 
@@ -940,8 +940,8 @@ public sealed class NestingDepthTests
         }
     }
 
-    // A node with a Point and a list of itself: record Node(Point Origin, IReadOnlyList<Node> Children).
-    private sealed class Placed(Point origin, IReadOnlyList<Placed> children)
+    // A node with a Point and a list of itself: record Node(Point Origin, OahuList<Node> Children).
+    private sealed class Placed(Point origin, OahuList<Placed> children)
     {
         // Each node above the 64th is its Origin, 16 bytes, and a list count of one, so the Origin of the 64th node,
         // at depth 65, starts at 63 × 17.
@@ -952,7 +952,7 @@ public sealed class NestingDepthTests
 
         public Point Origin { get; } = origin;
 
-        public IReadOnlyList<Placed> Children { get; } = children;
+        public OahuList<Placed> Children { get; } = children;
 
         public static void Write(OahuWriter writer, Placed node)
         {
