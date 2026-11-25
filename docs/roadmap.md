@@ -16,7 +16,7 @@ A checked box means the work is merged to `main`.
 - [x] Continuous integration: build and test on Linux, Windows and macOS; format check; pack
 - [x] Contribution and security guidance, and issue and pull request templates
 - [x] Dependabot updates for GitHub Actions and NuGet
-- [ ] Architecture overview and roadmap
+- [x] Architecture overview and roadmap
 
 ## The core
 
@@ -55,7 +55,7 @@ Android follows iOS with the same three native layers. These milestones are less
 
 These are expected to follow, with no commitment and no place in the order yet. Each needs a decision before it is scheduled.
 
-- Adapters for Rx and DynamicData view models
+- Adapters for Rx and DynamicData view models, as packages of their own over the adapter seam
 - Services, by which C# calls native code that the app writes
 - Navigation paths that keep a native stack of mounts in step with a view model
 - Recording and playing back sessions

@@ -112,7 +112,7 @@ The layers, in the order they are built. Each builds only on layers above it, th
 | Wire format | C# | The reader and writer for every value kind; the format's test vectors, which every other implementation must pass |
 | Contract vocabulary | C# | `[OahuContract]`, the four stream interfaces, keyed rows and list operations, structural equality |
 | Loop and sources | C# | `OahuLoop`, the four sources, derived state, delivery order and coalescing, the test loop |
-| Exporter | C# | Subscription and replay, forwarding, member dispatch, the drain before a native call returns, edit settlement, failures and faults |
+| Exporter | C# | Subscription and replay, forwarding, member dispatch, the drain before a native call returns, edit settlement, failures and faults, cancellation when a screen closes |
 | Contract model | C# | The model of a contract read from C# symbols, the canonical signature and the contract hash |
 | Analyzer and C# generator | C# | Diagnostics for contracts that cannot cross the seam; the generated exporter and its registration |
 | Hosting | C# | The public surface a platform host builds on, in the `AdamE.Oahu.Hosting` namespace of the core package: connecting a view model to a native screen, the contract check, containers and mounts, the teardown order, failure and fault reporting |
@@ -169,14 +169,4 @@ A host **must not**:
 
 ## Not part of this design yet
 
-These are expected to follow, each as its own layer after the first iOS preview. None is designed here.
-
-- Adapters for Rx and DynamicData view models, as packages of their own over the adapter seam
-- Services, by which C# calls native code that the app writes
-- Navigation paths that keep a native stack of mounts in step with a view model
-- Recording and playing back sessions
-- Localization and culture
-- Previews generated from C# fixtures
-- Text fields inside keyed-list rows, and a text field that handles input methods
-- An `oahu` command for setting up and diagnosing a project, and a project template
-- Hosts for other platforms, including macOS
+Some things are expected to follow the first iOS preview and are not designed here, among them adapters for Rx and DynamicData, services, navigation paths over mounts, and hosts for other platforms. The [roadmap](roadmap.md#not-scheduled) keeps the list.
