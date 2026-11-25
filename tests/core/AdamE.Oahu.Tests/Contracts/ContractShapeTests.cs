@@ -12,6 +12,24 @@ public sealed class ContractShapeTests
         IOahuEvents<string> Messages { get; }
     }
 
+    [OahuContract]
+    public interface ITasksViewModel
+    {
+        IOahuKeyedList<TaskRow> Tasks { get; }
+    }
+
+    public sealed record TaskRow(string Key, string Text, bool Done) : IOahuKeyed;
+
+    // A union row: every case has the positional Key, passed to the union's own.
+    public abstract record BoardRow(string Key) : IOahuKeyed
+    {
+        public sealed record Header(string Key, string Title) : BoardRow(Key);
+
+        public sealed record Card(string Key, string Text) : BoardRow(Key);
+    }
+
+    public readonly record struct TagRow(string Key, string Name) : IOahuKeyed;
+
     // Enough to show that the shapes compose. These are not sources: they never change and never deliver later.
     private sealed class FixedState<T>(T current) : IOahuState<T>
     {
@@ -45,6 +63,23 @@ public sealed class ContractShapeTests
         public IDisposable Subscribe(IObserver<T> observer) => NoSubscription.Instance;
     }
 
+    // Not a source either: its rows never change, so it only ever sends the replay.
+    private sealed class FixedKeyedList<T>(IReadOnlyList<T> items) : IOahuKeyedList<T>
+        where T : IOahuKeyed
+    {
+        public IReadOnlyList<T> Items { get; } = items;
+
+        public IDisposable Subscribe(IObserver<IReadOnlyList<ListOp<T>>> observer)
+        {
+            List<ListOp<T>> replay = [new ListOp<T>.Clear()];
+            for (var index = 0; index < Items.Count; index++)
+                replay.Add(new ListOp<T>.Insert(index, Items[index]));
+
+            observer.OnNext(replay);
+            return NoSubscription.Instance;
+        }
+    }
+
     private sealed class NoSubscription : IDisposable
     {
         public static readonly NoSubscription Instance = new();
@@ -59,6 +94,12 @@ public sealed class ContractShapeTests
         public IOahuState<string> FileName { get; } = new FixedState<string>("report.pdf");
 
         public IOahuEvents<string> Messages { get; } = new SilentEvents<string>();
+    }
+
+    private sealed class TasksViewModel : ITasksViewModel
+    {
+        public IOahuKeyedList<TaskRow> Tasks { get; } =
+            new FixedKeyedList<TaskRow>([new TaskRow("t0", "Milk", false)]);
     }
 
     [Fact]
@@ -111,5 +152,51 @@ public sealed class ContractShapeTests
 
         Assert.Same(events, widened);
         Assert.Same(events, observable);
+    }
+
+    [Fact]
+    public void A_class_implements_a_contract_with_a_keyed_list()
+    {
+        // A compile-time shape check and nothing more: a contract can declare a keyed list of a record row, and a class
+        // implement it. It tests no stream behavior; the sources' tests do that.
+        ITasksViewModel viewModel = new TasksViewModel();
+        IOahuKeyed row = viewModel.Tasks.Items[0];
+
+        Assert.Equal("t0", row.Key);
+    }
+
+    [Fact]
+    public void A_union_and_a_record_struct_can_be_rows()
+    {
+        // A compile-time shape check: the positional Key parameter implements IOahuKeyed.Key, on every case of a union
+        // and on a record struct.
+        IOahuKeyedList<BoardRow> board = new FixedKeyedList<BoardRow>(
+            [new BoardRow.Header("h", "Today"), new BoardRow.Card("c1", "Milk")]);
+        IOahuKeyedList<TagRow> tags = new FixedKeyedList<TagRow>([new TagRow("k", "Home")]);
+
+        Assert.Equal(["h", "c1"], board.Items.Select(row => row.Key));
+        Assert.Equal("k", tags.Items[0].Key);
+    }
+
+    [Fact]
+    public void A_keyed_list_is_invariant_and_an_observable_of_its_batches()
+    {
+        // ListOp<T> is a record, and a class cannot vary in its type argument, so IOahuKeyedList<T> cannot be
+        // covariant. It is still an observable of its batches, which widens to an observable of object.
+        var parameter = typeof(IOahuKeyedList<>).GetGenericArguments()[0];
+        Assert.Equal(
+            System.Reflection.GenericParameterAttributes.None,
+            parameter.GenericParameterAttributes & System.Reflection.GenericParameterAttributes.VarianceMask);
+        Assert.Equal([typeof(IOahuKeyed)], parameter.GetGenericParameterConstraints());
+
+        IOahuKeyedList<BoardRow> board = new FixedKeyedList<BoardRow>([]);
+        IObservable<IReadOnlyList<ListOp<BoardRow>>> batches = board;
+        IObservable<object> observable = board;
+
+        Assert.Same(board, batches);
+        Assert.Same(board, observable);
+
+        // A case on its own is never a contract's row type; it stands here only for a type that derives from the row.
+        Assert.False(typeof(IOahuKeyedList<BoardRow>).IsAssignableFrom(typeof(IOahuKeyedList<BoardRow.Card>)));
     }
 }

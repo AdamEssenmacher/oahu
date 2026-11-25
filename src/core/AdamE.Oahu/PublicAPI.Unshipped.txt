@@ -2,8 +2,47 @@
 AdamE.Oahu.IOahuEditable<T>
 AdamE.Oahu.IOahuEditable<T>.Edit(T value) -> void
 AdamE.Oahu.IOahuEvents<T>
+AdamE.Oahu.IOahuKeyed
+AdamE.Oahu.IOahuKeyed.Key.get -> string!
+AdamE.Oahu.IOahuKeyedList<T>
+AdamE.Oahu.IOahuKeyedList<T>.Items.get -> System.Collections.Generic.IReadOnlyList<T>!
 AdamE.Oahu.IOahuState<T>
 AdamE.Oahu.IOahuState<T>.Current.get -> T
+AdamE.Oahu.ListOp<T>
+AdamE.Oahu.ListOp<T>.Clear
+AdamE.Oahu.ListOp<T>.Clear.Clear() -> void
+AdamE.Oahu.ListOp<T>.Clear.Equals(AdamE.Oahu.ListOp<T>.Clear? other) -> bool
+AdamE.Oahu.ListOp<T>.Insert
+AdamE.Oahu.ListOp<T>.Insert.Deconstruct(out int Index, out T Item) -> void
+AdamE.Oahu.ListOp<T>.Insert.Equals(AdamE.Oahu.ListOp<T>.Insert? other) -> bool
+AdamE.Oahu.ListOp<T>.Insert.Index.get -> int
+AdamE.Oahu.ListOp<T>.Insert.Index.init -> void
+AdamE.Oahu.ListOp<T>.Insert.Insert(int Index, T Item) -> void
+AdamE.Oahu.ListOp<T>.Insert.Item.get -> T
+AdamE.Oahu.ListOp<T>.Insert.Item.init -> void
+AdamE.Oahu.ListOp<T>.ListOp(AdamE.Oahu.ListOp<T>! original) -> void
+AdamE.Oahu.ListOp<T>.Move
+AdamE.Oahu.ListOp<T>.Move.Deconstruct(out int From, out int To) -> void
+AdamE.Oahu.ListOp<T>.Move.Equals(AdamE.Oahu.ListOp<T>.Move? other) -> bool
+AdamE.Oahu.ListOp<T>.Move.From.get -> int
+AdamE.Oahu.ListOp<T>.Move.From.init -> void
+AdamE.Oahu.ListOp<T>.Move.Move(int From, int To) -> void
+AdamE.Oahu.ListOp<T>.Move.To.get -> int
+AdamE.Oahu.ListOp<T>.Move.To.init -> void
+AdamE.Oahu.ListOp<T>.Remove
+AdamE.Oahu.ListOp<T>.Remove.Deconstruct(out int Index) -> void
+AdamE.Oahu.ListOp<T>.Remove.Equals(AdamE.Oahu.ListOp<T>.Remove? other) -> bool
+AdamE.Oahu.ListOp<T>.Remove.Index.get -> int
+AdamE.Oahu.ListOp<T>.Remove.Index.init -> void
+AdamE.Oahu.ListOp<T>.Remove.Remove(int Index) -> void
+AdamE.Oahu.ListOp<T>.Replace
+AdamE.Oahu.ListOp<T>.Replace.Deconstruct(out int Index, out T Item) -> void
+AdamE.Oahu.ListOp<T>.Replace.Equals(AdamE.Oahu.ListOp<T>.Replace? other) -> bool
+AdamE.Oahu.ListOp<T>.Replace.Index.get -> int
+AdamE.Oahu.ListOp<T>.Replace.Index.init -> void
+AdamE.Oahu.ListOp<T>.Replace.Item.get -> T
+AdamE.Oahu.ListOp<T>.Replace.Item.init -> void
+AdamE.Oahu.ListOp<T>.Replace.Replace(int Index, T Item) -> void
 AdamE.Oahu.OahuContractAttribute
 AdamE.Oahu.OahuContractAttribute.OahuContractAttribute() -> void
 AdamE.Oahu.OahuUnit
@@ -52,11 +91,55 @@ AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
 AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
 AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>
+abstract AdamE.Oahu.ListOp<T>.<Clone>$() -> AdamE.Oahu.ListOp<T>!
 const AdamE.Oahu.Wire.OahuFormat.MaxNestingDepth = 64 -> int
+override AdamE.Oahu.ListOp<T>.Clear.<Clone>$() -> AdamE.Oahu.ListOp<T>.Clear!
+override AdamE.Oahu.ListOp<T>.Clear.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.Clear.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Clear.ToString() -> string!
+override AdamE.Oahu.ListOp<T>.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Insert.<Clone>$() -> AdamE.Oahu.ListOp<T>.Insert!
+override AdamE.Oahu.ListOp<T>.Insert.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.Insert.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Insert.ToString() -> string!
+override AdamE.Oahu.ListOp<T>.Move.<Clone>$() -> AdamE.Oahu.ListOp<T>.Move!
+override AdamE.Oahu.ListOp<T>.Move.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.Move.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Move.ToString() -> string!
+override AdamE.Oahu.ListOp<T>.Remove.<Clone>$() -> AdamE.Oahu.ListOp<T>.Remove!
+override AdamE.Oahu.ListOp<T>.Remove.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.Remove.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Remove.ToString() -> string!
+override AdamE.Oahu.ListOp<T>.Replace.<Clone>$() -> AdamE.Oahu.ListOp<T>.Replace!
+override AdamE.Oahu.ListOp<T>.Replace.Equals(object? obj) -> bool
+override AdamE.Oahu.ListOp<T>.Replace.GetHashCode() -> int
+override AdamE.Oahu.ListOp<T>.Replace.ToString() -> string!
+override AdamE.Oahu.ListOp<T>.ToString() -> string!
 override AdamE.Oahu.OahuUnit.GetHashCode() -> int
 override AdamE.Oahu.OahuUnit.ToString() -> string!
+override sealed AdamE.Oahu.ListOp<T>.Clear.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+override sealed AdamE.Oahu.ListOp<T>.Insert.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+override sealed AdamE.Oahu.ListOp<T>.Move.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+override sealed AdamE.Oahu.ListOp<T>.Remove.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+override sealed AdamE.Oahu.ListOp<T>.Replace.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+static AdamE.Oahu.ListOp<T>.Clear.operator !=(AdamE.Oahu.ListOp<T>.Clear? left, AdamE.Oahu.ListOp<T>.Clear? right) -> bool
+static AdamE.Oahu.ListOp<T>.Clear.operator ==(AdamE.Oahu.ListOp<T>.Clear? left, AdamE.Oahu.ListOp<T>.Clear? right) -> bool
+static AdamE.Oahu.ListOp<T>.Insert.operator !=(AdamE.Oahu.ListOp<T>.Insert? left, AdamE.Oahu.ListOp<T>.Insert? right) -> bool
+static AdamE.Oahu.ListOp<T>.Insert.operator ==(AdamE.Oahu.ListOp<T>.Insert? left, AdamE.Oahu.ListOp<T>.Insert? right) -> bool
+static AdamE.Oahu.ListOp<T>.Move.operator !=(AdamE.Oahu.ListOp<T>.Move? left, AdamE.Oahu.ListOp<T>.Move? right) -> bool
+static AdamE.Oahu.ListOp<T>.Move.operator ==(AdamE.Oahu.ListOp<T>.Move? left, AdamE.Oahu.ListOp<T>.Move? right) -> bool
+static AdamE.Oahu.ListOp<T>.operator !=(AdamE.Oahu.ListOp<T>? left, AdamE.Oahu.ListOp<T>? right) -> bool
+static AdamE.Oahu.ListOp<T>.operator ==(AdamE.Oahu.ListOp<T>? left, AdamE.Oahu.ListOp<T>? right) -> bool
+static AdamE.Oahu.ListOp<T>.Remove.operator !=(AdamE.Oahu.ListOp<T>.Remove? left, AdamE.Oahu.ListOp<T>.Remove? right) -> bool
+static AdamE.Oahu.ListOp<T>.Remove.operator ==(AdamE.Oahu.ListOp<T>.Remove? left, AdamE.Oahu.ListOp<T>.Remove? right) -> bool
+static AdamE.Oahu.ListOp<T>.Replace.operator !=(AdamE.Oahu.ListOp<T>.Replace? left, AdamE.Oahu.ListOp<T>.Replace? right) -> bool
+static AdamE.Oahu.ListOp<T>.Replace.operator ==(AdamE.Oahu.ListOp<T>.Replace? left, AdamE.Oahu.ListOp<T>.Replace? right) -> bool
 static AdamE.Oahu.OahuUnit.Value.get -> AdamE.Oahu.OahuUnit
 static AdamE.Oahu.OahuUnit.operator !=(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool
 static AdamE.Oahu.OahuUnit.operator ==(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool
+virtual AdamE.Oahu.ListOp<T>.EqualityContract.get -> System.Type!
+virtual AdamE.Oahu.ListOp<T>.Equals(AdamE.Oahu.ListOp<T>? other) -> bool
+virtual AdamE.Oahu.ListOp<T>.PrintMembers(System.Text.StringBuilder! builder) -> bool
 virtual AdamE.Oahu.Wire.OahuReadFunc<T>.Invoke(ref AdamE.Oahu.Wire.OahuReader reader) -> T
 ~override AdamE.Oahu.OahuUnit.Equals(object obj) -> bool

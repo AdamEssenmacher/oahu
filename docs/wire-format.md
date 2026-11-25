@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the whole format except the batches of a keyed list, which a later milestone adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, the no-value type, enums, unions and the nesting depth of records and unions.
+This page covers the whole format except the batches of a keyed list, which the next part of the contract vocabulary, milestone 2 of the [roadmap](roadmap.md), adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, the no-value type, enums, unions and the nesting depth of records and unions.
 
 ## Messages
 
