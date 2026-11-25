@@ -96,6 +96,43 @@ public sealed class InstantTests
     }
 
     [Theory]
+    [InlineData("8000", 0L)]
+    [InlineData("828000", 1L)]
+    [InlineData("81808080808080808000", -1L)]
+    [InlineData("feeffea1fa9df300", MaxMilliseconds)]
+    public void A_longer_than_shortest_encoding_is_accepted(string hex, long milliseconds)
+    {
+        var reader = new OahuReader(Hex.Bytes(hex));
+        var read = reader.ReadInstant();
+        reader.EnsureEnd();
+
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcTicks, read.UtcTicks);
+        Assert.Equal(TimeSpan.Zero, read.Offset);
+    }
+
+    [Fact]
+    public void A_longer_than_shortest_encoding_outside_the_range_is_rejected_as_its_shortest_form()
+    {
+        var input = Hex.Bytes("80f0fea1fa9df300");
+        var reader = new OahuReader(input);
+
+        OahuFormatException? exception = null;
+        try
+        {
+            reader.ReadInstant();
+        }
+        catch (OahuFormatException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.NotNull(exception);
+        Assert.Equal(0, exception.Offset);
+        Assert.Equal(OutOfRangeMessage(0, MaxMilliseconds + 1), exception.Message);
+        Assert.Equal(input.Length, reader.Remaining);
+    }
+
+    [Theory]
     [InlineData("81e0e6a2e2a01c", MinMilliseconds - 1)]
     [InlineData("80f0fea1fa9d73", MaxMilliseconds + 1)]
     [InlineData("ffffffffffffffffff01", long.MinValue)]
