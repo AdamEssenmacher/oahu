@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations.
+This page covers the parts of the format that exist so far: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values and lists.
 
 ## Messages
 
@@ -166,6 +166,47 @@ Notes for implementers. A Swift `Date` is a `Double` of seconds since 2001-01-01
 
 A Kotlin `kotlin.time.Duration` is exact to the nanosecond up to 4,611,686,018,426,999,999 nanoseconds, about ±146 years. Beyond that it holds whole milliseconds, cut towards zero, so up to 9,999 ticks are lost. `TimeSpan.MaxValue` and `TimeSpan.MinValue` arrive 5,807 and 5,808 ticks closer to zero. Two more traps: multiplying ticks by 100 to get nanoseconds overflows a `Long` beyond 92,233,720,368,547,758 ticks, about ±292 years, and `inWholeNanoseconds` saturates beyond about ±292 years. A Kotlin codec that must keep every tick keeps the count as a `Long`.
 
+## Nullable values
+
+A nullable value is one presence byte, then the value when it is present. The presence byte is `00` when the value is absent and `01` when it is present. An absent value has no more bytes. A present value is written as a value of its type would be without the presence byte.
+
+| Value | Bytes |
+| --- | --- |
+| An absent `int` | `00` |
+| The `int` 5 | `01 0a` |
+| An absent string | `00` |
+| The string `x` | `01 01 78` |
+| The empty string | `01 00` |
+| The double 1.5 | `01 00 00 00 00 00 00 f8 3f` |
+
+A reader rejects any presence byte other than `00` and `01`, such as `02` or `ff`.
+
+In C#, `OahuWriter.WritePresence` writes the presence byte and `OahuReader.ReadPresence` reads it. After `true`, the caller writes or reads the value itself.
+
+## Lists
+
+A list is the number of its items as a count, then each item in order. Each item is written as a value of the item type would be. There is nothing between the items and nothing after the last one.
+
+| Value | Bytes |
+| --- | --- |
+| An empty list | `00` |
+| The `int`s 1 and 2 | `02 02 04` |
+| The strings `a` and `bc` | `02 01 61 02 62 63` |
+| The booleans false, true, false | `03 00 01 00` |
+| One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
+| 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
+
+Every item of a list takes at least one byte. The contract rules forbid an item type whose values can be written as no bytes at all. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates: that total is bounded by the nesting depth times the size of the input. For a type of fixed depth, the type sets the depth. For a type that contains itself, such as a record with a list of itself, the input sets the depth, and deep nesting can exhaust a reader's stack. The format does not yet limit nesting depth.
+
+Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
+
+| Value | Bytes |
+| --- | --- |
+| A list of three lists of `int`s: empty, then 1, then 2 and 3 | `03 00 01 02 02 04 06` |
+| A list of nullable strings: absent, `x`, the empty string, absent | `04 00 01 01 78 01 00 00` |
+
+In C#, `OahuWriter.WriteList` and `OahuReader.ReadList` take a delegate that writes or reads one item. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `ReadList` returns an array of exactly the count's length and allocates nothing else, apart from what the delegate allocates for the items; an empty list is the same shared instance every time. `WriteList` reads the list's `Count` once. After the items, it throws `InvalidOperationException` if they wrote fewer bytes than there are items; it does not check each item on its own. It also throws `InvalidOperationException` if the delegate reset the writer. If the delegate throws, or `WriteList` does, the exception propagates. The writer's contents are then unspecified, so reset it before writing another message.
+
 ## Malformed input
 
 A reader rejects input that is not in the format. It never guesses at a value or skips bytes. Each of these makes a message malformed:
@@ -182,6 +223,10 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - An instant is earlier than -62,135,596,800,000 or later than 253,402,300,799,999 milliseconds from the Unix epoch.
 - A string's length is larger than the number of bytes left after it.
 - A string's bytes are not well-formed UTF-8. This includes an overlong form, such as `c0 af` for `/`; an encoded surrogate, U+D800 to U+DFFF, such as `ed a0 80`; a code point above U+10FFFF, such as `f4 90 80 80`; a sequence cut short, such as `e2 82` at the end of the string or `c3 28`; a continuation byte (`80` to `bf`) that no lead byte comes before; and the bytes `c0`, `c1` and `f5` to `ff`, which never appear in UTF-8.
+- A presence byte is neither `00` nor `01`, or the input ends before it.
+- A list's count is malformed in any of the ways a count is, above.
+- A list's count is larger than the number of bytes left after it.
+- An item of a list, or a present value, is malformed in any of the ways a value of its type is.
 - Bytes are left over after the message's value.
 
-In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
+In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length, and for a list, its count. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. The exception is `ReadList` when an item is malformed: the items before it have been read. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
