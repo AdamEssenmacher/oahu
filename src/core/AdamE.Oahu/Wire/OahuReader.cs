@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.Text;
+using System.Text.Unicode;
 
 namespace AdamE.Oahu.Wire;
 
@@ -185,6 +188,45 @@ public ref struct OahuReader
         return BitConverter.Int64BitsToDouble(bits);
     }
 
+    /// <summary>
+    /// Reads a string: its UTF-8 byte length, written as a count, followed by that many bytes of strict UTF-8.
+    /// </summary>
+    /// <remarks>
+    /// The bytes must be well-formed UTF-8. Overlong forms, encoded surrogates, code points above U+10FFFF, truncated
+    /// sequences and stray continuation bytes are rejected, never replaced with U+FFFD. U+0000 and U+FEFF are read as
+    /// ordinary characters. Only the string returned is allocated.
+    /// </remarks>
+    /// <returns>The string read.</returns>
+    /// <exception cref="OahuFormatException">
+    /// The length is malformed, as for <see cref="ReadCount"/>, the length is larger than the bytes that remain after
+    /// it, or the bytes are not well-formed UTF-8.
+    /// </exception>
+    public string ReadString()
+    {
+        var start = _offset;
+        var length = ReadCount();
+        var bytesStart = _offset;
+        var available = _input.Length - bytesStart;
+        if (length > available)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The string at byte offset {start} is {length} byte(s) long, but only {available} byte(s) remain " +
+                "after its length.",
+                start);
+        }
+
+        var bytes = _input.Slice(bytesStart, length);
+        if (!Utf8.IsValid(bytes))
+        {
+            _offset = start;
+            throw IllFormedUtf8(start, bytesStart, bytes);
+        }
+
+        _offset = bytesStart + length;
+        return Encoding.UTF8.GetString(bytes);
+    }
+
     /// <summary>Checks that the whole input has been read.</summary>
     /// <exception cref="OahuFormatException">Bytes remain after the last value read.</exception>
     public readonly void EnsureEnd()
@@ -206,5 +248,27 @@ public ref struct OahuReader
         }
 
         return _input[position];
+    }
+
+    private static OahuFormatException IllFormedUtf8(int start, int bytesStart, ReadOnlySpan<byte> bytes)
+    {
+        var index = 0;
+        while (true)
+        {
+            var status = Rune.DecodeFromUtf8(bytes[index..], out _, out var consumed);
+            if (status == OperationStatus.Done)
+            {
+                index += consumed;
+                continue;
+            }
+
+            var problem = status == OperationStatus.NeedMoreData
+                ? "is cut short by the end of the string"
+                : "is ill-formed";
+            return new OahuFormatException(
+                $"The string at byte offset {start} is not well-formed UTF-8: the sequence at byte offset " +
+                $"{bytesStart + index} {problem}.",
+                start);
+        }
     }
 }
