@@ -320,7 +320,7 @@ public ref struct OahuReader
     /// After each item, the method throws <see cref="InvalidOperationException"/> if the item left the depth different
     /// from what it was before that item, because it called <see cref="EnterNested"/> and <see cref="ExitNested"/> a
     /// different number of times. That is a fault in the item's codec, not in the input. The check is made after each
-    /// item, so a codec that enters without exiting is reported as such and not as a value nested too deep. An item
+    /// item, so an item codec that enters without exiting is reported as such and not as a value nested too deep. An item
     /// that is nested too deep throws <see cref="OahuFormatException"/> from inside <paramref name="readItem"/>,
     /// before the check.
     /// </para>

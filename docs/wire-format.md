@@ -250,7 +250,8 @@ In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a uni
 
 - `OahuWriter.EnterNested` throws `InvalidOperationException` for a value at depth 65, before anything of the value is written. Reset the writer before writing another message.
 - `OahuReader.EnterNested` throws `OahuFormatException` for a value at depth 65. Its offset is where that value starts, and the reader stays where it was.
-- `ExitNested` throws `InvalidOperationException` on both when no value is entered. `OahuReader.EnsureEnd` throws it when a value is still entered. `WriteList` and `ReadList` throw it when an item leaves the depth different from what it was before that item, so a codec that enters without exiting is not reported as too-deep input. Each is a fault in a codec, not in the input.
+- `ExitNested` throws `InvalidOperationException` on both when no value is entered. `OahuReader.EnsureEnd` throws it when a value is still entered. `WriteList` and `ReadList` throw it when an item leaves the depth different from what it was before that item. Each is a fault in a codec, not in the input.
+- These checks cover list items and the end of a message, and nothing else. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
 - `OahuWriter.Reset` returns the writer's depth to zero.
 
 ## Malformed input
