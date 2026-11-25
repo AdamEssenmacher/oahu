@@ -1,4 +1,9 @@
 #nullable enable
+AdamE.Oahu.IOahuEvents<T>
+AdamE.Oahu.IOahuState<T>
+AdamE.Oahu.IOahuState<T>.Current.get -> T
+AdamE.Oahu.OahuContractAttribute
+AdamE.Oahu.OahuContractAttribute.OahuContractAttribute() -> void
 AdamE.Oahu.Wire.OahuFormat
 AdamE.Oahu.Wire.OahuFormatException
 AdamE.Oahu.Wire.OahuFormatException.Offset.get -> int
