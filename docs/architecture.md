@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** this page describes the design Oahu is being built to. The code arrives in small pull requests in the order set out in the roadmap, and until a part has landed, the types named here do not exist yet. Type names are the planned ones and may change before they ship. Sections will link to code as it lands.
+> **Status:** this page describes the design Oahu is being built to. The code arrives in small pull requests in the order set out in the [roadmap](roadmap.md), and until a part has landed, the types named here do not exist yet. Type names are the planned ones and may change before they ship. Sections will link to code as it lands.
 
 ## The central idea
 
@@ -105,7 +105,7 @@ The host finds an app's screen provider by a class name derived from the contrac
 
 ## Layers
 
-The layers, in the order they are built. Each builds only on layers above it, though not on all of them: the contract model, analyzer and C# generator do not use the loop or the exporter, and the property-change adapter uses none of the Swift or iOS layers. The roadmap follows this order.
+The layers, in the order they are built. Each builds only on layers above it, though not on all of them: the contract model, analyzer and C# generator do not use the loop or the exporter, and the property-change adapter uses none of the Swift or iOS layers. The [roadmap](roadmap.md) follows this order.
 
 | Layer | Language | Owns |
 | --- | --- | --- |
@@ -116,10 +116,10 @@ The layers, in the order they are built. Each builds only on layers above it, th
 | Contract model | C# | The model of a contract read from C# symbols, the canonical signature and the contract hash |
 | Analyzer and C# generator | C# | Diagnostics for contracts that cannot cross the seam; the generated exporter and its registration |
 | Hosting | C# | The public surface a platform host builds on, in the `AdamE.Oahu.Hosting` namespace of the core package: connecting a view model to a native screen, the contract check, containers and mounts, the teardown order, failure and fault reporting |
-| Swift runtime | Swift | The Swift reader and writer, the fixed interface, the connection, events, keyed lists, the SwiftUI container and mount view, the preview port |
+| Swift runtime | Swift | The Swift reader and writer, the fixed interface, the connection, events, keyed lists, text editing, the SwiftUI container, the mount registry and mount view, the preview port |
 | Swift emitter | C# | The generated Swift model, codecs and screen provider for each contract |
 | Build integration | C#, MSBuild | The native code generator, with one command line that writes its output or checks that it is current, and the build targets that run it and package the app's native library with each build |
-| iOS host | C# | The binding of the fixed interface, the port, screen lookup, and showing a screen or a mount in a .NET iOS app |
+| iOS host | C# | The binding of the fixed interface, the port, screen lookup, and showing a container or a mount in a .NET iOS app |
 | Property-change adapter | C# | Sources over an existing `INotifyPropertyChanged` view model, its commands and its collections, and the public seam that adapters build on |
 
 The first pass is for iOS 17 and later, and for iOS alone: the iOS host and the SwiftUI part of the Swift runtime carry no code for other Apple platforms. Support for iOS 16, which an app opts in to, follows as a step of its own. Android follows with the same three native layers: a Kotlin runtime, a Kotlin emitter and an Android host.
@@ -177,5 +177,6 @@ These are expected to follow, each as its own layer after the first iOS preview.
 - Recording and playing back sessions
 - Localization and culture
 - Previews generated from C# fixtures
-- An `oahu` command for setting up and diagnosing a project
+- Text fields inside keyed-list rows, and a text field that handles input methods
+- An `oahu` command for setting up and diagnosing a project, and a project template
 - Hosts for other platforms, including macOS
