@@ -108,6 +108,27 @@ public sealed class OahuWriter
         BinaryPrimitives.WriteInt64LittleEndian(Reserve(sizeof(double)), BitConverter.DoubleToInt64Bits(value));
 
     /// <summary>
+    /// Writes <paramref name="value"/> as the number of milliseconds since the Unix epoch, 1970-01-01T00:00:00Z,
+    /// written as for <see cref="WriteLong"/>.
+    /// </summary>
+    /// <remarks>
+    /// A fraction of a millisecond is rounded down, towards the earlier time, also before 1970: 0.9999 ms after the epoch
+    /// is written as 0, and 0.5 ms before it as -1. The offset is not written, so two values for the same instant with
+    /// different offsets are written the same, and the reader gets the instant in UTC.
+    /// </remarks>
+    /// <param name="value">The instant to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteInstant(DateTimeOffset value) => WriteLong(value.ToUnixTimeMilliseconds());
+
+    /// <summary>
+    /// Writes <paramref name="value"/> as its count of 100-nanosecond ticks, written as for <see cref="WriteLong"/>.
+    /// </summary>
+    /// <remarks>Every <see cref="TimeSpan"/> is written exactly.</remarks>
+    /// <param name="value">The duration to write.</param>
+    /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
+    public void WriteDuration(TimeSpan value) => WriteLong(value.Ticks);
+
+    /// <summary>
     /// Writes <paramref name="value"/> as its UTF-8 byte length, written as a count, followed by its UTF-8 bytes.
     /// </summary>
     /// <remarks>

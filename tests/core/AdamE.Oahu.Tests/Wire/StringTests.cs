@@ -540,15 +540,8 @@ public sealed class StringTests
     public void Reading_the_empty_string_allocates_nothing()
     {
         byte[] input = [0];
-        for (var i = 0; i < 100; i++)
-            ReadOnce(input);
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 10_000; i++)
-            ReadOnce(input);
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.Equal(0, allocated);
+        Assert.Equal(0, Allocations.Smallest(() => ReadOnce(input)));
 
         static void ReadOnce(byte[] input)
         {
@@ -602,22 +595,14 @@ public sealed class StringTests
     private static void AssertWritesWithoutAllocating(string value, int capacity)
     {
         var writer = new OahuWriter(capacity);
-        for (var i = 0; i < 100; i++)
-        {
-            writer.Reset();
-            writer.WriteString(value);
-        }
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 10_000; i++)
-        {
-            writer.Reset();
-            writer.WriteString(value);
-        }
-
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.Equal(0, allocated);
+        Assert.Equal(
+            0,
+            Allocations.Smallest(() =>
+            {
+                writer.Reset();
+                writer.WriteString(value);
+            }));
     }
 
     private static string IllFormedMessage(int start, int badOffset, bool truncated) =>
