@@ -6,27 +6,26 @@ Oahu is under construction. It is being built in a planned sequence of small pul
 - For anything beyond a small fix (a typo, a broken link, a bug with an obvious fix), open an issue before you write code. The core is being assembled in a fixed order, so a feature pull request that was not discussed first will probably be closed, however good it is. Asking first saves you that work.
 - Report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in an issue.
 
-## Build and check
+## Build and test
 
 You need the .NET 11 SDK, version 11.0.100 or any later 11.0 release; `global.json` enforces this and does not allow preview SDKs. Run these commands from the repository root:
 
 ```sh
 dotnet build Oahu.slnx -c Release
+dotnet test Oahu.slnx -c Release
 dotnet format Oahu.slnx --verify-no-changes
 dotnet pack Oahu.slnx -c Release -o artifacts/packages
 ```
 
-To fix formatting rather than check it, run `dotnet format Oahu.slnx`. Packages are written to `artifacts/packages`, which git ignores. Each package comes with a `.snupkg` symbol package.
+Tests live in `tests/<area>/<Project>.Tests`, such as `tests/core/AdamE.Oahu.Tests`, and run on Microsoft.Testing.Platform through xUnit v3, so VSTest options such as `--logger` and `--collect` do not apply. To fix formatting rather than check it, run `dotnet format Oahu.slnx`. Packages are written to `artifacts/packages`, which git ignores. Each package comes with a `.snupkg` symbol package.
 
-The solution has no test projects yet.
-
-CI runs these steps, plus `dotnet test Oahu.slnx -c Release`, on every pull request. The `Build and test (Linux)`, `Build and test (Windows)` and `Build and test (macOS)` checks build and test on each operating system. `Format and pack` verifies formatting, packs, and fails if a package has no symbol package. All four must pass.
+CI runs the same steps on every pull request. The `Build and test (Linux)`, `Build and test (Windows)` and `Build and test (macOS)` checks build and test on each operating system. `Format and pack` verifies formatting, packs, and fails if a package has no symbol package. All four must pass.
 
 ## Pull requests
 
 A pull request must:
 
-- Add one discrete piece of value, with its documentation in the same pull request. Documentation means XML documentation on public API and, for user-visible behavior, the README.
+- Add one discrete piece of value, with its tests and documentation in the same pull request. A change to behavior carries tests that exercise it, and the tests pass. Documentation means XML documentation on public API and, for user-visible behavior, the README or the relevant page in `docs/`.
 - Have a title in the imperative, such as `Add the wire format codec`. Pull requests are squash-merged, so the title becomes the commit subject on `main`. Push changes made in response to review as new commits; do not force-push. If your branch conflicts with `main`, merge `main` into it.
 - Record public API changes in the project's `PublicAPI.Unshipped.txt`. The build fails with RS0016 for a public symbol that is not listed and RS0017 for a listed symbol that no longer exists; add or remove the line the diagnostic names (your IDE's code fix for RS0016 writes it for you). Do not edit `PublicAPI.Shipped.txt`; entries move there at release, and removing a shipped symbol is a breaking change to raise in an issue first.
 - Have XML documentation comments on every public type and member in library projects. A missing one fails the build with CS1591.
