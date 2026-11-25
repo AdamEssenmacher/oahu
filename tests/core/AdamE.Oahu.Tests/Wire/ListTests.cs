@@ -635,6 +635,84 @@ public sealed class ListTests
         Assert.Empty(read.Children);
     }
 
+    [Fact]
+    public void An_item_writer_that_resets_the_writer_and_writes_nothing_is_rejected()
+    {
+        var writer = new OahuWriter();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList([1], static (w, _) => w.Reset()));
+
+        Assert.Equal(ResetMessage, exception.Message);
+    }
+
+    [Fact]
+    public void An_item_writer_that_resets_the_writer_then_writes_fewer_bytes_than_there_are_items_is_rejected()
+    {
+        var writer = new OahuWriter();
+
+        // The first item resets the writer; the other two write one byte each after it.
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList([1, 2, 3], static (w, item) =>
+            {
+                if (item == 1)
+                    w.Reset();
+                else
+                    w.WriteInt(item);
+            }));
+
+        Assert.Equal(ResetMessage, exception.Message);
+    }
+
+    [Fact]
+    public void An_item_writer_that_resets_the_writer_then_writes_many_bytes_is_rejected()
+    {
+        var writer = new OahuWriter();
+        writer.WriteString("Milk");
+
+        // The items start at byte offset 6. After the reset, the first item writes 20 bytes and the second 1, so the
+        // byte check alone would pass, though the string and the count are gone.
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList([20, 1], static (w, item) =>
+            {
+                if (item == 20)
+                    w.Reset();
+                WriteThatManyBools(w, item);
+            }));
+
+        Assert.Equal(ResetMessage, exception.Message);
+    }
+
+    [Fact]
+    public void An_item_writer_of_an_inner_list_that_resets_the_writer_is_rejected()
+    {
+        var writer = new OahuWriter();
+        int[][] lists = [[1, 2], [3, 4, 5, 6, 7, 8, 9, 10]];
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList(lists, static (w, list) => w.WriteList(list, static (inner, item) =>
+            {
+                if (item == 3)
+                    inner.Reset();
+                inner.WriteInt(item);
+            })));
+
+        Assert.Equal(ResetMessage, exception.Message);
+    }
+
+    [Fact]
+    public void A_reset_between_two_lists_is_allowed()
+    {
+        var writer = new OahuWriter();
+        writer.WriteList([1, 2], WriteIntItem);
+        writer.Reset();
+        writer.WriteList([3], WriteIntItem);
+
+        Assert.Equal("01" + "06", Hex.Of(writer.WrittenSpan));
+    }
+
+    private const string ResetMessage = "An item writer reset the writer while its list was being written.";
+
     private static string TooFewItemBytesMessage(int count, int bytes) =>
         $"The list's {count} item(s) wrote only {bytes} byte(s), fewer than there are items. " +
         "Every item must write at least one byte.";

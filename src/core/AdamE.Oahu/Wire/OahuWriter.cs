@@ -26,6 +26,9 @@ public sealed class OahuWriter
     private byte[] _buffer;
     private int _count;
 
+    // Counts calls to Reset, so that WriteList can tell that an item writer reset the writer.
+    private int _resets;
+
     /// <summary>Creates a writer with a default initial capacity.</summary>
     public OahuWriter()
         : this(DefaultCapacity)
@@ -50,9 +53,14 @@ public sealed class OahuWriter
 
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
-    /// The buffer is kept and never shrinks, so it keeps the size that the largest message written so far needed.
+    /// The buffer is kept and never shrinks, so it keeps the size that the largest message written so far needed. Do
+    /// not call it from an item writer of <see cref="WriteList{T}"/>: the list then throws.
     /// </remarks>
-    public void Reset() => _count = 0;
+    public void Reset()
+    {
+        _count = 0;
+        _resets++;
+    }
 
     /// <summary>
     /// Writes <paramref name="value"/> as an unsigned variable-length integer, in the shortest form: 1 to 10 bytes.
@@ -206,9 +214,14 @@ public sealed class OahuWriter
     /// reader accepts the count. It does not check each item on its own.
     /// </para>
     /// <para>
-    /// A <see langword="null"/> argument throws before anything is written. If <paramref name="writeItem"/> throws, or
-    /// the items wrote fewer bytes than there are items, the exception propagates and the writer's contents are
-    /// unspecified: call <see cref="Reset"/> before writing another message.
+    /// <paramref name="writeItem"/> must not call <see cref="Reset"/>, because that would remove the list's count and
+    /// everything written before it. After the items, the method throws if the writer was reset while they were
+    /// written.
+    /// </para>
+    /// <para>
+    /// A <see langword="null"/> argument throws before anything is written. If <paramref name="writeItem"/> throws, the
+    /// writer was reset, or the items wrote fewer bytes than there are items, the exception propagates and the writer's
+    /// contents are unspecified: call <see cref="Reset"/> before writing another message.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The type of the items.</typeparam>
@@ -218,8 +231,8 @@ public sealed class OahuWriter
     /// <paramref name="items"/> or <paramref name="writeItem"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The message would be longer than <see cref="Array.MaxLength"/> bytes, or the items wrote fewer bytes than there
-    /// are items.
+    /// The message would be longer than <see cref="Array.MaxLength"/> bytes, <paramref name="writeItem"/> reset the
+    /// writer, or the items wrote fewer bytes than there are items.
     /// </exception>
     public void WriteList<T>(IReadOnlyList<T> items, Action<OahuWriter, T> writeItem)
     {
@@ -230,8 +243,13 @@ public sealed class OahuWriter
         var count = items.Count;
         WriteCount(count);
         var itemsStart = _count;
+        var resets = _resets;
         for (var i = 0; i < count; i++)
             writeItem(this, items[i]);
+
+        // A reset followed by enough writes can leave _count above itemsStart, so the byte check alone misses it.
+        if (_resets != resets)
+            throw new InvalidOperationException("An item writer reset the writer while its list was being written.");
 
         // One check per list. It guarantees that a reader's count check passes, but it does not prove that each item
         // wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make up for it.
