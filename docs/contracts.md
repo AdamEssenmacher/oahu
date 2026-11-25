@@ -71,7 +71,7 @@ An editable's value type is any type a contract value may have, except `OahuUnit
 
 `IOahuEditable<T>` derives from `IOahuState<T>`, but its `T` is not covariant, because the value is proposed as well as read. So an `IOahuEditable<string>` can be used as an `IOahuState<string>` or an `IOahuState<object>`, but not as an `IOahuEditable<object>`.
 
-An editable also gives the contract one member: its edit, which the screen calls. [Order](#order) says how streams and methods are numbered.
+An editable also gives the contract one member: its edit, which the screen calls. [Order](#order) says how streams and members are numbered.
 
 A screen that renames a document:
 
@@ -166,4 +166,4 @@ Like the rules for values, this rule is not enforced yet; the analyzer will enfo
 
 ## Order
 
-A contract's streams are numbered in the order they are declared, and its methods are numbered separately, in the order they are declared. An editable is a stream and also contributes one member, its edit; how an editable's edit is numbered among the methods is defined with the contract model. How a contract split across partial declarations, or one that inherits from another interface, is ordered is defined with the contract model, in a later milestone. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.
+A contract's streams are numbered in the order they are declared. Its members are numbered separately. A member is a method or an editable's edit, so an editable is a stream and also contributes one member. Methods keep the order they are declared in. Where each edit falls in the members' numbering is not decided here: it is defined with the contract model, and nothing should assume it until then. How a contract split across partial declarations, or one that inherits from another interface, is ordered is defined with the contract model, in a later milestone. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.

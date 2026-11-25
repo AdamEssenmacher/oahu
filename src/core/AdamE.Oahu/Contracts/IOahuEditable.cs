@@ -32,8 +32,9 @@ namespace AdamE.Oahu;
 /// </remarks>
 /// <typeparam name="T">
 /// The type of the value: a type a contract value may have, except <see cref="OahuUnit"/>. It is invariant, because the
-/// value is both read and proposed. An editable can still be used as a state of a wider type, through the covariance of
-/// <see cref="IOahuState{T}"/>, but not as an editable of a wider type.
+/// value is both read and proposed. When it is a reference type, an editable can still be used as a state of a wider
+/// type, through the covariance of <see cref="IOahuState{T}"/>, but never as an editable of a wider type. Covariance
+/// does not apply to a value type, so an editable of <see cref="int"/> is not a state of <see cref="object"/>.
 /// </typeparam>
 public interface IOahuEditable<T> : IOahuState<T>
 {
