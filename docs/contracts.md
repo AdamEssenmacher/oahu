@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the two stream interfaces `IOahuState<T>` and `IOahuEvents<T>`, and the no-value type `OahuUnit`. Later pull requests add editable values (`IOahuEditable<T>`), keyed lists (`IOahuKeyedList<T>`, with their rows and list operations), methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the three stream interfaces `IOahuState<T>`, `IOahuEditable<T>` and `IOahuEvents<T>`, and the no-value type `OahuUnit`. Later pull requests add keyed lists (`IOahuKeyedList<T>`, with their rows and list operations), methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -18,7 +18,7 @@ The vocabulary is in the `AdamE.Oahu` namespace, the one an app author imports. 
 
 ## State and events
 
-The vocabulary has two kinds of stream so far. The rules below are requirements on every implementation of the stream interfaces. Oahu's own sources keep them, and an implementation of your own, such as an adapter or a hand-written state, must keep them too, because the exporter and other observers rely on them.
+The vocabulary has three kinds of stream so far: state and events, described here, and [editable values](#editable-values), which are states the screen can also change. The rules below are requirements on every implementation of the stream interfaces. Oahu's own sources keep them, and an implementation of your own, such as an adapter or a hand-written state, must keep them too, because the exporter and other observers rely on them.
 
 **State** (`IOahuState<T>`) is a value that always has a current one: a title, a count, the status of a download. Use it for anything the screen draws from.
 
@@ -42,13 +42,48 @@ IOahuEvents<OahuUnit> Saved { get; }
 
 Each occurrence is still delivered once, and two are still two deliveries, though every value of `OahuUnit` is equal. It may be used nowhere else, as [No value](#no-value) says.
 
-Both kinds of stream follow these rules too:
+State and events both follow these rules too:
 
 - **Disposal.** Disposing a subscription stops all delivery to it at once, even later in a delivery turn that is already running, and even when the observer disposes it during its own callback. Disposing it again does nothing.
 - **One thread.** A stream is used only on the UI thread: `Current` is read there, observers subscribe and dispose their subscriptions there, and values are delivered there. Changing a state's value or publishing an occurrence on another thread is a fault, as the [architecture](architecture.md#invariants) says. Reading `Current`, subscribing or disposing a subscription on another thread is a mistake too; whether Oahu reports it as a fault is specified with the sources, so an implementation must not rely on it being allowed.
 - **Observer exceptions.** An exception thrown by an observer is a fault, as the [architecture](architecture.md#other-operations) says. The details arrive with the sources.
 
 The [architecture](architecture.md#the-path-of-one-change) describes delivery turns and the loop that runs them.
+
+## Editable values
+
+An **editable value** (`IOahuEditable<T>`) is a state that the screen can also change: the text of a field, the position of a slider, a selected option. The view model owns the value. The screen proposes a new one, and the view model decides what the value becomes.
+
+These rules, like those above, are requirements on every implementation:
+
+- **It is a state.** Everything above that applies to a state applies to an editable: `Current` is the value now, a new observer receives it during `Subscribe`, later changes arrive in later delivery turns and only when they differ, disposal stops delivery at once, it never completes or fails, and it is used only on the UI thread. Anything that takes a state can take an editable.
+- **An edit is a proposal.** The screen calls `Edit(value)`. The implementation may accept the value, change it (trim text, clamp a number to a range) or refuse it, and it must settle on one of these before `Edit` returns. When `Edit` returns, `Current` is the result.
+- **What an edit changes.** If the settled value differs from the value held before the call, the edit is a change to the state and is delivered under the state's rules, merged with any other changes before the next delivery turn. If it is the same, the edit changes nothing, whatever value was proposed. That is what a refusal looks like, and also a change that lands back on the value held before, such as text cut down to a length it already had. "Differs" and "the same" follow the state's rule: contract values compare by structure. How lists and doubles compare, such as 0.0 and -0.0, or NaN, is defined with structural equality, a later part of the vocabulary.
+- **Settling is not delivering.** No observer runs while `Edit` is on the stack. Delivering the result is the exporter's work, as below, not the implementation's.
+- **Settle now.** The result is what `Current` holds when `Edit` returns, so an edit cannot settle later, after an `await`, a timer or a posted callback. Work that must be asynchronous, such as checking a name with a server, is done another way: settle now on what is known, and report the outcome through another stream, such as a state that holds an error message. A later change the view model makes in its own way is a new change, not the edit's result.
+- **One thread.** `Edit` is called on the UI thread. Calling it on another thread is a fault, even if the edit would be refused.
+- **Exceptions.** Whether an exception thrown by `Edit` is a failure or a fault is not decided yet: it is specified with the exporter, and an implementation must not rely on either. After `Edit` throws, `Current` must still be a value the implementation could have settled on.
+- **Two ways in.** `Edit` is how the screen changes the value. The view model has its own way to set the value, and both go through the same rules: a value equal to the current one changes nothing.
+
+What the native model and the exporter do, which is not the implementation's work: the screen does not take an edited value for itself, and shows only what the view model publishes. The exporter delivers the result of an edit before the outermost native call returns. An edit the screen makes while it is receiving a message is delivered later in the delivery turn already running, as the [architecture](architecture.md#the-path-of-one-change) says. An edit that changes nothing leaves the screen showing the value it already had.
+
+An editable's value type is any type a contract value may have, except `OahuUnit`, as [No value](#no-value) says.
+
+`IOahuEditable<T>` derives from `IOahuState<T>`, but its `T` is not covariant, because the value is proposed as well as read. So an `IOahuEditable<string>` can be used as an `IOahuState<string>` or an `IOahuState<object>`, but not as an `IOahuEditable<object>`.
+
+An editable also gives the contract one member: its edit, which the screen calls. [Order](#order) says how streams and methods are numbered.
+
+A screen that renames a document:
+
+```csharp
+[OahuContract]
+public interface IRenameViewModel
+{
+    IOahuEditable<string> Title { get; }
+}
+```
+
+The screen binds a text field to the title. The model has the title from the moment the screen subscribes, like any state. When the user types, the model does not take the new text for itself: it sends the edit, and shows only what the view model publishes. Suppose the view model trims spaces from the end of a title. The user types "Plan" and the view model accepts it, so the field shows "Plan". The user types a space: the view model settles on "Plan", the value it already had, so the edit changes nothing and the field goes on showing "Plan". What the view model publishes reaches the screen before the outermost native call returns; an edit the screen makes while it is receiving a message is delivered later in the delivery turn already running. The [architecture](architecture.md#other-operations) says this, and also describes how the exporter checks the settlement.
 
 ## An example
 
@@ -131,4 +166,4 @@ Like the rules for values, this rule is not enforced yet; the analyzer will enfo
 
 ## Order
 
-A contract's streams are numbered in the order they are declared, and its members are numbered separately, in the order they are declared. How a contract split across partial declarations, or one that inherits from another interface, is ordered is defined with the contract model, in a later milestone. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.
+A contract's streams are numbered in the order they are declared, and its methods are numbered separately, in the order they are declared. An editable is a stream and also contributes one member, its edit; how an editable's edit is numbered among the methods is defined with the contract model. How a contract split across partial declarations, or one that inherits from another interface, is ordered is defined with the contract model, in a later milestone. The wire format writes record fields, enum values and union cases by their position too. So order matters: reordering changes what the bytes mean. Both sides of an app must be built from the same contract.
