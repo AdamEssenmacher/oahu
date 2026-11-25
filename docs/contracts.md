@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, and the two stream interfaces `IOahuState<T>` and `IOahuEvents<T>`. Later pull requests add editable values (`IOahuEditable<T>`), keyed lists (`IOahuKeyedList<T>`, with their rows and list operations), methods and their rules, the no-value type `OahuUnit`, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the two stream interfaces `IOahuState<T>` and `IOahuEvents<T>`, and the no-value type `OahuUnit`. Later pull requests add editable values (`IOahuEditable<T>`), keyed lists (`IOahuKeyedList<T>`, with their rows and list operations), methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -33,6 +33,14 @@ The vocabulary has two kinds of stream so far. The rules below are requirements 
 - Each occurrence is delivered once to each observer that was subscribed when it was published and is still subscribed when it is delivered.
 - Events are never merged: two occurrences are two deliveries, even when their values are equal.
 - Like a state, events reach observers in a later delivery turn, and they never complete or fail.
+
+Some events have nothing to say but that they happened: the document was saved, so play a sound. Their type is the no-value type, `OahuUnit`, whose one value is `OahuUnit.Value`:
+
+```csharp
+IOahuEvents<OahuUnit> Saved { get; }
+```
+
+Each occurrence is still delivered once, and two are still two deliveries, though every value of `OahuUnit` is equal. It may be used nowhere else, as [No value](#no-value) says.
 
 Both kinds of stream follow these rules too:
 
@@ -87,6 +95,7 @@ A stream carries values of these types. Each links to the section of the wire fo
 | [Union](wire-format.md#unions) | An abstract record with its cases nested in it |
 | [Nullable value](wire-format.md#nullable-values) | `T?` of any of these except a nullable value: a nullable value's type is never itself nullable |
 | [List](wire-format.md#lists) | `IReadOnlyList<T>` of any of these |
+| [No value](wire-format.md#the-no-value-type) | `OahuUnit`, only as the whole type of an events stream, as [No value](#no-value) says |
 
 No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
 
@@ -101,6 +110,24 @@ The wire format relies on these rules and gives no bytes to a type that breaks o
 - **Cycles.** No record contains its own type through record fields alone, directly or through other records, with no list, nullable value or union on the way.
 - **Enums.** An enum has at least one member, no two members with the same number, and no `[Flags]` attribute.
 - **List items.** A list's item type is never a record that is no bytes, which is a record whose fields are all records that are no bytes, such as a record with no fields; a nullable value of such a record is allowed.
+- **No value.** `OahuUnit` is only ever the whole type of an events stream, as [No value](#no-value) says.
+
+## No value
+
+`OahuUnit` is the type of a stream that carries no value: `IOahuEvents<OahuUnit>`. That is the only place a contract may use it. It is never:
+
+- the type of any stream but events: a state (`IOahuState<OahuUnit>`), an editable value or a keyed list;
+- nullable (`OahuUnit?`), even as an events stream's type: `IOahuEvents<OahuUnit?>` is not allowed;
+- a list's item type (`IReadOnlyList<OahuUnit>`), a record's field or a union case's field;
+- a method's argument.
+
+Use something else in those places. A method with no argument declares no parameter, not an `OahuUnit` one. A state always has a value, and that value is worth a real type: a `bool`, an enum or a record. `IOahuEvents<OahuUnit?>` would say no more than `IOahuEvents<OahuUnit>`, so write that instead. Where a value with nothing in it is wanted elsewhere, declare a record with no fields, such as `public sealed record Empty();`. It is no bytes too, but it is an ordinary record, allowed wherever a record is except as a list's item type, and its name says what it means. The rule on `OahuUnit` catches accidents; a record with no fields is a deliberate choice.
+
+A list of things that have no content can use neither `OahuUnit` nor a record with no fields as its item type. Carry how many there are as an `int`, use a list of a nullable empty record (`IReadOnlyList<Empty?>`), whose items are each one byte, or give the items a real field.
+
+Like the rules for values, this rule is not enforced yet; the analyzer will enforce it.
+
+`OahuUnit` is not a record value: it has no fields and is not positional, and it adds no nesting depth. On the wire its value is no bytes, so each occurrence of an `IOahuEvents<OahuUnit>` is an empty message, as [The no-value type](wire-format.md#the-no-value-type) says.
 
 ## Order
 

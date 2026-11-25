@@ -61,6 +61,7 @@ public sealed partial class WireVectorTests
         ["Nullable values"] = ["nullable"],
         ["Lists"] = ["list"],
         ["Records"] = ["record"],
+        ["The no-value type"] = ["unit"],
         ["Enums"] = ["enum"],
         ["Unions"] = ["union"],
         ["Nesting depth"] = ["depth"],
@@ -265,7 +266,7 @@ public sealed partial class WireVectorTests
 
             // A number in the Value column of a table of integers, and the Milliseconds and Ticks columns, is the
             // vector's value; the Zigzag value column is that value zigzag-encoded, and the value of the bytes.
-            var numeric = vector.Type is PrimitiveType { Kind: not (Primitive.Double or Primitive.String or Primitive.Bool) };
+            var numeric = vector.Type is PrimitiveType { Kind: var kind } && IsNumber(kind);
             foreach (var column in new[] { "Value", "Milliseconds", "Ticks", "Zigzag value" })
             {
                 var index = row.Header.ToList().IndexOf(column);
@@ -364,6 +365,18 @@ public sealed partial class WireVectorTests
     // Each pattern is a message's fixed text, with {0} where the message has a number or a byte.
     private static bool Matches(string pattern, string message) =>
         Regex.IsMatch(message, "^" + Regex.Escape(pattern).Replace("\\{0}", "[0-9a-f-]+", StringComparison.Ordinal));
+
+    // Whether a primitive's value is a number. The switch names every primitive and has no default arm, so a primitive
+    // added without an arm here is a compile error (CS8509, a warning treated as an error), not a silently skipped
+    // check. CS8524 only warns that a value outside the named members is unhandled, which never happens here.
+#pragma warning disable CS8524
+    private static bool IsNumber(Primitive kind) => kind switch
+    {
+        Primitive.Int or Primitive.Long or Primitive.Count or Primitive.VarUInt or Primitive.Instant or
+            Primitive.Duration => true,
+        Primitive.Bool or Primitive.Double or Primitive.String or Primitive.Unit => false,
+    };
+#pragma warning restore CS8524
 
     private static BigInteger Zigzag(BigInteger value) => value >= 0 ? 2 * value : -2 * value - 1;
 

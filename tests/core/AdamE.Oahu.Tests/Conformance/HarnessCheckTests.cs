@@ -81,6 +81,40 @@ public sealed class HarnessCheckTests
         Assert.Equal(["A bullet", "Another bullet"], page.MalformedInput);
     }
 
+    [Theory]
+    [InlineData("list<unit>", "unit is allowed only as a vector's whole type")]
+    [InlineData("unit?", "unit cannot be nullable")]
+    public void The_no_value_type_is_only_a_vector_s_whole_type_and_never_nullable(string type, string problem)
+    {
+        var error = Assert.Throws<InvalidDataException>(() => VectorTypeParser.Parse(type, NoTypes, wholeType: true));
+
+        Assert.Equal($"The type expression \"{type}\" is not valid: {problem}.", error.Message);
+    }
+
+    [Fact]
+    public void The_no_value_type_is_not_a_record_s_field()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => ParseTypes(
+            """[{"name": "A", "record": [{"name": "Nothing", "type": "unit"}]}]"""));
+
+        Assert.Equal(
+            "The type expression \"unit\" is not valid: unit is allowed only as a vector's whole type.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("0")]
+    [InlineData("\"\"")]
+    public void The_no_value_type_s_value_is_null_and_nothing_else(string json)
+    {
+        var unit = VectorTypeParser.Parse("unit", NoTypes, wholeType: true);
+
+        Assert.Equal("null", VectorValues.Canonical(unit, null));
+        Assert.Throws<InvalidDataException>(() => VectorValues.Canonical(unit, JsonNode.Parse(json)));
+    }
+
+    private static readonly Dictionary<string, VectorType> NoTypes = [];
+
     private static Dictionary<string, VectorType> ParseTypes(string json) =>
         VectorFile.ParseTypes(JsonNode.Parse(json) as JsonArray ?? throw new InvalidOperationException("Not an array."));
 }

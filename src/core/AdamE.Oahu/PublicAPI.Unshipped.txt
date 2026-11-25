@@ -4,6 +4,9 @@ AdamE.Oahu.IOahuState<T>
 AdamE.Oahu.IOahuState<T>.Current.get -> T
 AdamE.Oahu.OahuContractAttribute
 AdamE.Oahu.OahuContractAttribute.OahuContractAttribute() -> void
+AdamE.Oahu.OahuUnit
+AdamE.Oahu.OahuUnit.Equals(AdamE.Oahu.OahuUnit other) -> bool
+AdamE.Oahu.OahuUnit.OahuUnit() -> void
 AdamE.Oahu.Wire.OahuFormat
 AdamE.Oahu.Wire.OahuFormatException
 AdamE.Oahu.Wire.OahuFormatException.Offset.get -> int
@@ -48,4 +51,10 @@ AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
 AdamE.Oahu.Wire.OahuWriter.WrittenCount.get -> int
 AdamE.Oahu.Wire.OahuWriter.WrittenSpan.get -> System.ReadOnlySpan<byte>
 const AdamE.Oahu.Wire.OahuFormat.MaxNestingDepth = 64 -> int
+override AdamE.Oahu.OahuUnit.GetHashCode() -> int
+override AdamE.Oahu.OahuUnit.ToString() -> string!
+static AdamE.Oahu.OahuUnit.Value.get -> AdamE.Oahu.OahuUnit
+static AdamE.Oahu.OahuUnit.operator !=(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool
+static AdamE.Oahu.OahuUnit.operator ==(AdamE.Oahu.OahuUnit left, AdamE.Oahu.OahuUnit right) -> bool
 virtual AdamE.Oahu.Wire.OahuReadFunc<T>.Invoke(ref AdamE.Oahu.Wire.OahuReader reader) -> T
+~override AdamE.Oahu.OahuUnit.Equals(object obj) -> bool
