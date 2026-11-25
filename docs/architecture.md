@@ -28,7 +28,7 @@ A contract has **streams**, which carry values from the view model to the screen
 
 A member is a **method**, returning `void` or `Task` and taking at most one value, or an **edit** to an editable. A `Task` method may also take a trailing `CancellationToken`. Members return nothing to the screen. A screen learns the result of a call the way it learns everything else: from the streams.
 
-The values in a contract are immutable: booleans, numbers, strings, instants, durations, enums, records, unions of records, nullable values and lists of these. They compare by structure.
+The values in a contract are immutable: booleans, the numbers `int`, `long` and `double`, strings, instants (`DateTimeOffset`), durations (`TimeSpan`), enums, records, unions of records, nullable values and lists of these. They compare by structure.
 
 The **view model** is an ordinary C# class that implements the contract. It knows nothing about its screen (it cannot tell whether one is attached, visible or covered) and it runs in a plain unit test with no device.
 
@@ -74,7 +74,7 @@ When a screen subscribes, the current value of each state and editable, and the 
 
 ## Other operations
 
-- **Edits.** A native model does not take an edited value for itself. It sends the edit and shows only what the view model publishes. The view model may accept the value, change it or refuse it, and must settle on one of these before its handler returns. An accepted or changed value is published, and reaches the screen before the outermost edit call returns. A refusal leaves the value as it was, so nothing is published and the screen goes on showing the value it already had. The exporter checks the settlement as far as it can see it, and a mismatch is a fault.
+- **Edits.** A native model does not take an edited value for itself. It sends the edit and shows only what the view model publishes. The view model may accept the value, change it or refuse it, and must settle on one of these before its handler returns. If the value the view model settles on differs from the one it held, it is published, and reaches the screen before the outermost edit call returns. If it is the same, nothing is published and the screen goes on showing the value it already had. That is what a refusal looks like, and also a change that lands back on the current value, such as text cut down to a length it already had. The exporter checks the settlement as far as it can see it and accepts both cases; a mismatch is a fault.
 - **Showing a screen.** A host shows a screen in one of two ways. As a **container**, it gets a platform view controller that holds the screen. As a **mount**, the view model is connected and registered under an ID, and the app's own native view hierarchy places it. A mounted screen is an ordinary view in that hierarchy, so native navigation, transitions and environment values work between Oahu screens as they do between any two views. Oahu has no navigation layer of its own.
 - **Teardown.** Closing a screen ends the native side first, then the exporter, then whatever the host owns for the view model. A `Task` method still running sees its cancellation token cancelled. Failures during teardown are collected and reported together; one failure does not stop the rest. A screen closed from inside a native call is torn down in a later pass of the UI thread's run loop.
 - **Failures and faults.** A method that throws, or whose `Task` fails or is cancelled, is a **failure**: it is reported to the host, and the app continues. The one exception is a cancellation that follows the screen's own close, which is expected and is not reported. A broken rule of the seam is a **fault**, such as a change made off the UI thread, bytes that do not decode, or an exception from an observer. Two rules hold in every runtime: a fault never unwinds across the bridge, and it is never swallowed, so the app ends. When the app ends depends on how the language stops. In C# and Kotlin a fault is an exception, which must not cross native frames: the core catches it, reports it once, and posts the end of the app to the UI thread through the host, for the next pass of the run loop. In Swift a fault stops the process where it is detected, without unwinding. A Swift fault can be detected inside a call from C#, as when a message does not decode, and then nothing on the C# side gets to report it.
@@ -83,8 +83,8 @@ When a screen subscribes, the current value of each state and editable, and the 
 
 A message is the bytes of one value and nothing else. There is no header, tag or schema in it, because both sides are generated from the same contract.
 
-- A `bool` is one byte. Integers are zigzag-encoded and then written as variable-length integers; counts, lengths and indexes are variable-length integers without the zigzag step. A `double` is eight bytes, little-endian. A string is a byte count followed by strict UTF-8.
-- An instant is milliseconds since the Unix epoch, rounded down. A duration is a count of 100-nanosecond ticks.
+- A `bool` is one byte. An `int` or a `long` is zigzag-encoded and then written as a variable-length integer; counts, lengths and indexes are variable-length integers without the zigzag step. A `double` is eight bytes, little-endian. No other numeric type can cross the seam. A string is a byte count followed by strict UTF-8.
+- An instant is milliseconds since the Unix epoch in UTC, rounded down, encoded as a `long`. Its offset is not carried. A duration is a count of 100-nanosecond ticks, encoded as a `long`.
 - A record is its fields in order. An enum is its index. A union is its case index followed by that case's fields. A nullable value is a presence byte followed by the value. A list is a count followed by its items. A method with no argument sends no bytes.
 - A keyed-list message is a batch of operations (insert, remove, move, replace, clear), applied all together or not at all. A list's current content is replayed as a clear followed by one insert for each row.
 
@@ -105,7 +105,7 @@ The host finds an app's screen provider by a class name derived from the contrac
 
 ## Layers
 
-The layers, in the order they are built. Each builds on those above it. The roadmap follows this order.
+The layers, in the order they are built. Each builds only on layers above it, though not on all of them: the contract model, analyzer and C# generator do not use the loop or the exporter, and the property-change adapter uses none of the Swift or iOS layers. The roadmap follows this order.
 
 | Layer | Language | Owns |
 | --- | --- | --- |
