@@ -11,6 +11,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- The conformance tests read docs/wire-format.md and tests/conformance/wire-format from the repository. -->
+        <AssemblyMetadata Include="RepositoryRoot" Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../..'))" />
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\..\..\src\core\AdamE.Oahu\AdamE.Oahu.csproj" />
     </ItemGroup>
 

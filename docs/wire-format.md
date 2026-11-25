@@ -33,13 +33,15 @@ A writer always writes the shortest form: it stops after the highest group that 
 | 4,294,967,295 | `ff ff ff ff 0f` |
 | 18,446,744,073,709,551,615 (the largest) | `ff ff ff ff ff ff ff ff ff 01` |
 
-A reader accepts a longer form than the shortest, up to 10 bytes. For example, `80 00` and `80 80 80 80 80 80 80 80 80 00` are both read as 0. In a 10-byte integer the last byte holds only the value's top bit, so it must be `00` or `01`.
+A reader accepts a longer form than the shortest, up to 10 bytes. For example, `80 00` and `80 80 80 80 80 80 80 80 80 00` are both read as 0. In a 10-byte integer the last byte holds only the value's top bit, so it must be `00` or `01`. A tenth byte with its high bit set makes the integer longer than 10 bytes, whatever follows, including the end of the input: a reader rejects `80 80 80 80 80 80 80 80 80 80` as too long, not as cut short, and does not read an eleventh byte.
 
 ## Counts
 
 A count, such as a length or a number of items, is a whole number from 0 to 2,147,483,647, the largest value of a C# `int`. It is written as a variable-length integer. A writer refuses a negative count.
 
 A reader rejects a count larger than 2,147,483,647, even when the integer itself is well formed.
+
+A reader checks that a count is a valid count first, and only then compares it with the bytes that remain. So a length or count above 2,147,483,647 is rejected as a count that is too large, whatever follows.
 
 ## Booleans
 
@@ -96,6 +98,8 @@ A NaN is written and read with its bits unchanged too. But a language runtime ma
 ## Strings
 
 A string is its length as a count, then that many bytes of UTF-8. The length is the number of UTF-8 bytes, not the number of characters. There is no terminator and no byte-order mark.
+
+A reader reads the length as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a length above 2,147,483,647 is rejected as a count that is too large, whatever follows.
 
 | Value | Bytes |
 | --- | --- |
@@ -200,7 +204,7 @@ A list is the number of its items as a count, then each item in order. Each item
 | One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 | 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
 
-Every item of a list takes at least one byte. The contract rules forbid an item type whose values are no bytes, which is a record that is no bytes as [Records](#records) defines it. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
+Every item of a list takes at least one byte. The contract rules forbid an item type whose values are no bytes, which is a record that is no bytes as [Records](#records) defines it. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
 
 Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
 
@@ -377,7 +381,7 @@ In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a uni
 A reader rejects input that is not in the format. It never guesses at a value or skips bytes. Each of these makes a message malformed:
 
 - The input ends inside a variable-length integer.
-- A variable-length integer is longer than 10 bytes.
+- A variable-length integer is longer than 10 bytes. A tenth byte with its high bit set makes it longer than 10 bytes, whatever follows, including the end of the input.
 - The last byte of a 10-byte integer is greater than `01`, so the value does not fit in 64 bits.
 - A count is larger than 2,147,483,647.
 - A boolean's byte is neither `00` nor `01`.
@@ -386,11 +390,12 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - The input ends before a boolean, or inside a double.
 - An instant or a duration is malformed in any of the ways a `long` is, above.
 - An instant is earlier than -62,135,596,800,000 or later than 253,402,300,799,999 milliseconds from the Unix epoch.
-- A string's length is larger than the number of bytes left after it.
+- A string's length is malformed in any of the ways a count is, above.
+- A string's length is larger than the number of bytes left after it. A length larger than 2,147,483,647 is rejected as a count that is too large instead, whatever follows.
 - A string's bytes are not well-formed UTF-8. This includes an overlong form, such as `c0 af` for `/`; an encoded surrogate, U+D800 to U+DFFF, such as `ed a0 80`; a code point above U+10FFFF, such as `f4 90 80 80`; a sequence cut short, such as `e2 82` at the end of the string or `c3 28`; a continuation byte (`80` to `bf`) that no lead byte comes before; and the bytes `c0`, `c1` and `f5` to `ff`, which never appear in UTF-8.
 - A presence byte is neither `00` nor `01`, or the input ends before it.
 - A list's count is malformed in any of the ways a count is, above.
-- A list's count is larger than the number of bytes left after it.
+- A list's count is larger than the number of bytes left after it. A count larger than 2,147,483,647 is rejected as a count that is too large instead, whatever follows.
 - An item of a list, a present value, a field of a record or a field of a union's case is malformed in any of the ways a value of its type is.
 - An enum's or a union's index is malformed in any of the ways a variable-length integer is, above.
 - An enum's or a union's index is not below the number of the type's values or cases.
@@ -398,3 +403,7 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - Bytes are left over after the message's value.
 
 In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length, and for a list, its count. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. The exception is `ReadList` when an item is malformed: the items before it have been read. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
+
+## Test vectors
+
+The format's test vectors are in [`tests/conformance/wire-format/vectors.json`](../tests/conformance/wire-format/vectors.json). For many values, the file gives the exact bytes; for many byte sequences, it says that a reader must reject them, and why. Every implementation of the format must pass every vector. The file's [README](../tests/conformance/wire-format/README.md) describes it and what an implementation does with each kind of vector.

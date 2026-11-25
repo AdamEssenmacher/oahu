@@ -22,8 +22,8 @@ A checked box means the work is merged to `main`.
 
 The core is the `AdamE.Oahu` package. Its milestones are the first seven [layers](architecture.md#layers), in the same order. None of them needs a device. The property-change adapter, also in `AdamE.Oahu`, comes after the iOS host (milestone 12).
 
-- [ ] **1. Wire format.** The reader and writer for every value kind: booleans, `int`, `long`, `double`, strings, instants, durations, enums, records, unions, nullable values, lists and keyed-list batches. The format's test vectors, which every later implementation must pass. The first test project.
-- [ ] **2. Contract vocabulary.** `[OahuContract]`; the four stream interfaces; keyed rows and list operations; structural equality for contract values.
+- [x] **1. Wire format.** The reader and writer for every value kind: booleans, `int`, `long`, `double`, strings, instants, durations, enums, records, unions, nullable values and lists, and the limit on nesting depth. The format's test vectors, which every later implementation must pass. The first test project.
+- [ ] **2. Contract vocabulary.** `[OahuContract]`; the four stream interfaces; keyed rows and list operations, and the encoding of a keyed-list batch; structural equality for contract values.
 - [ ] **3. Loop and sources.** `OahuLoop` and delivery turns; the state, editable, event and keyed-list sources; derived state; delivery order and what each stream kind delivers in a turn; the rule against changes off the UI thread; the test loop.
 - [ ] **4. Exporter.** Subscription and replay; forwarding to a sink; member dispatch; the delivery turn before an outermost native call returns; edit settlement; method failures and faults; cancellation when a screen closes.
 - [ ] **5. Contract model.** The model of a contract read from C# symbols; the canonical signature and the contract hash, with test vectors shared by everything that computes it.
