@@ -1,6 +1,6 @@
 # Oahu
 
-One App, Handcrafted UI, for .NET.
+One App, Host-native UIs, for .NET.
 
 Oahu keeps an app's view models in C# and its screens native, in SwiftUI and Jetpack Compose. A generated seam carries state and actions between the two, so neither side is written twice and neither is bound by hand.
 
@@ -8,4 +8,4 @@ Oahu keeps an app's view models in C# and its screens native, in SwiftUI and Jet
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/AdamEssenmacher/oahu/blob/main/LICENSE)
