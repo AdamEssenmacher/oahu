@@ -76,6 +76,24 @@ jobs:
       - name: Pack
         run: dotnet pack Oahu.slnx -c Release --no-build -o artifacts/packages
 
+      - name: Verify packages
+        run: |
+          shopt -s nullglob
+          found=0
+          missing=0
+          for pkg in artifacts/packages/*.nupkg; do
+            found=1
+            if [ ! -f "${pkg%.nupkg}.snupkg" ]; then
+              echo "::error::No symbol package for ${pkg##*/}"
+              missing=1
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No .nupkg in artifacts/packages"
+            exit 1
+          fi
+          exit "$missing"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
