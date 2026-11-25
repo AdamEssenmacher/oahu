@@ -90,6 +90,19 @@ internal static class DepthVectors
             "A list of one Node, then 62 more inside it; the Origin of the 63rd is at depth 64");
         yield return Rejected("depth.list-of-node-64-rejected", "list<Node>", "01" + NodeHex(64),
             "A list of one Node, then 63 more inside it; the Origin of the 64th is at depth 65");
+
+        // A batch of one insert of a KeyedTree, a row with a list of itself. A batch and its operations add no depth,
+        // so the row is at depth 1. The batch is its count, 01, the insert's tag, 00, and its index, 00; then each
+        // level is its key, 00, then its list's count: 01, or 00 for the last.
+        yield return RoundTrip("depth.batch-keyed-tree-64", "batch<KeyedTree>", InsertOf(KeyedTree(64)),
+            "010000" + Chain("0001", "0000", 64),
+            "A batch of one insert of 64 KeyedTrees, each in its parent's Children; the batch adds no depth, so the last " +
+            "is at depth 64");
+        yield return Rejected("depth.batch-keyed-tree-65-rejected", "batch<KeyedTree>",
+            "010000" + Chain("0001", "0000", 65),
+            "A batch of one insert of 65 KeyedTrees; the 65th is at depth 65");
+        yield return Refused("depth.batch-keyed-tree-65-refused", "batch<KeyedTree>", InsertOf(KeyedTree(65)),
+            "A batch of one insert of 65 KeyedTrees; the 65th is at depth 65");
     }
 
     /// <summary>
@@ -153,6 +166,16 @@ internal static class DepthVectors
         ["Name"] = "",
         ["Children"] = levels > 1 ? new JsonArray(Tree(levels - 1)) : new JsonArray(),
     };
+
+    private static JsonObject KeyedTree(int levels) => new()
+    {
+        ["Key"] = "",
+        ["Children"] = levels > 1 ? new JsonArray(KeyedTree(levels - 1)) : new JsonArray(),
+    };
+
+    // A batch of one operation, an insert of row at index 0.
+    private static JsonArray InsertOf(JsonObject row) =>
+        new(new JsonObject { ["insert"] = new JsonObject { ["index"] = 0, ["item"] = row } });
 
     private static JsonObject Link(int levels) => new()
     {

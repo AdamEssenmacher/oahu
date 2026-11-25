@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AdamE.Oahu.Wire;
@@ -30,18 +31,25 @@ public sealed partial class WireVectorTests
         ["presence-invalid"] = ["The input ends before the presence byte", "The presence byte at byte offset {0} is 0x{0}"],
         ["list-count-exceeds-bytes"] = ["The list at byte offset {0} has {0} item(s), but only {0} byte(s) remain"],
         ["index-range"] = ["The index {0} at byte offset {0} is not below {0}, the number of values or cases"],
+        ["batch-empty"] = ["The batch at byte offset {0} has no operations, and every batch has at least one."],
+        ["batch-count-exceeds-bytes"] = ["The batch at byte offset {0} has {0} operation(s), but only {0} byte(s) remain"],
+        ["tag-range"] = ["The operation tag {0} at byte offset {0} is not one of the tags of the five operations"],
         ["too-deep"] = ["The value at byte offset {0} is at nesting depth 65, deeper than the largest nesting depth, 64."],
         ["leftover-bytes"] = ["{0} unread byte(s) remain at the end of the input"],
     };
 
     private static readonly HashSet<string> ViaCodes =
-        new(["int-varuint", "time-long", "string-length", "list-count", "part", "index-varuint"], StringComparer.Ordinal);
+        new(
+            ["int-varuint", "time-long", "string-length", "list-count", "part", "index-varuint", "batch-count",
+                "tag-varuint", "op-index", "op-row"],
+            StringComparer.Ordinal);
 
     // For each refusal code, the exception OahuWriter throws and the start of its message, if the harness checks it.
     private static readonly Dictionary<string, (Type Exception, string? Message)> RefusalExceptions =
         new(StringComparer.Ordinal)
         {
             ["negative-count"] = (typeof(ArgumentOutOfRangeException), null),
+            ["empty-batch"] = (typeof(ArgumentException), "A batch has at least one operation."),
             ["too-deep"] = (typeof(InvalidOperationException),
                 "The value at byte offset {0} is at nesting depth 65, deeper than the largest nesting depth, 64."),
         };
@@ -64,6 +72,7 @@ public sealed partial class WireVectorTests
         ["The no-value type"] = ["unit"],
         ["Enums"] = ["enum"],
         ["Unions"] = ["union"],
+        ["Keyed-list batches"] = ["batch"],
         ["Nesting depth"] = ["depth"],
         ["Malformed input"] = [],
         ["Test vectors"] = [],
@@ -84,6 +93,16 @@ public sealed partial class WireVectorTests
             "Enums: `High`, read from a longer form of index 0",
         ],
         StringComparer.Ordinal);
+
+    // The tag of each operation of a batch, by its name in the page's operations table.
+    private static readonly Dictionary<string, byte> OperationTags = new(StringComparer.Ordinal)
+    {
+        ["Insert"] = OahuFormat.InsertTag,
+        ["Remove"] = OahuFormat.RemoveTag,
+        ["Move"] = OahuFormat.MoveTag,
+        ["Replace"] = OahuFormat.ReplaceTag,
+        ["Clear"] = OahuFormat.ClearTag,
+    };
 
     public static IEnumerable<TheoryDataRow<string>> VectorNames =>
         VectorFile.Current.Vectors.Select(v => new TheoryDataRow<string>(v.Name) { TestDisplayName = v.Name });
@@ -308,6 +327,59 @@ public sealed partial class WireVectorTests
     }
 
     [Fact]
+    public void The_page_s_operations_table_has_the_writer_s_tags_and_the_harness_s_payload_order()
+    {
+        // The table of Keyed-list batches with the columns Operation, Tag and Payload. Each row's tag is the writer's
+        // constant and its position in the table. Its payload lists the operation's arguments in the order of the
+        // first cell, of ListOp<T>'s case, and of the fields the harness gives ListOp<T>, which the batch vectors
+        // exercise.
+        var rows = WireFormatPage.Current.TableRows
+            .Where(row => row.Section == "Keyed-list batches" && row.Header.SequenceEqual(["Operation", "Tag", "Payload"]))
+            .ToList();
+
+        Assert.Equal(
+            OperationTags.Keys.Order(StringComparer.Ordinal),
+            rows.Select(r => OperationCell().Match(r.Cells[0]).Groups[1].Value).Order(StringComparer.Ordinal));
+        for (var position = 0; position < rows.Count; position++)
+        {
+            var row = rows[position];
+            var operation = OperationCell().Match(row.Cells[0]);
+            Assert.True(operation.Success, $"The page's operation {row.Cells[0]} is not of the form `Name(Arguments)`.");
+            var name = operation.Groups[1].Value;
+            var arguments = operation.Groups[2].Value.Length == 0
+                ? []
+                : operation.Groups[2].Value.Split(", ", StringSplitOptions.None);
+
+            var tag = OperationTags[name];
+            Assert.True(
+                row.Cells[1] == tag.ToString(CultureInfo.InvariantCulture) && tag == position,
+                $"The page gives {name} the tag {row.Cells[1]} at position {position}; the writer's tag is {tag}.");
+
+            var payload = row.Cells[2] == "Nothing"
+                ? []
+                : row.Cells[2].Split(", then ", StringSplitOptions.None).Select(part => part.Trim('`')).ToArray();
+            Assert.True(
+                payload.SequenceEqual(arguments),
+                $"The page's payload of {name} is {row.Cells[2]}, not its arguments in order: {string.Join(", ", arguments)}.");
+
+            // A case's one public constructor is its primary one; a record's copy constructor is protected.
+            var parameters = typeof(ListOp<>).GetNestedType(name)!
+                .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                .Single()
+                .GetParameters()
+                .Select(p => p.Name!);
+            Assert.True(
+                parameters.SequenceEqual(arguments),
+                $"The page's {row.Cells[0]} does not have the parameters of ListOp<T>.{name}: {string.Join(", ", parameters)}.");
+
+            var fields = VectorValues.OperationFields[name.ToLowerInvariant()];
+            Assert.True(
+                fields.SequenceEqual(payload.Select(part => part.ToLowerInvariant())),
+                $"The page's payload of {name} is {row.Cells[2]}; the harness gives ListOp<T> the fields {string.Join(", ", fields)}.");
+        }
+    }
+
+    [Fact]
     public void The_file_is_in_its_layout_with_the_generated_depth_vectors()
     {
         var path = Repository.VectorFile;
@@ -403,6 +475,9 @@ public sealed partial class WireVectorTests
             case ListType list:
                 Collect(list.Item, used);
                 break;
+            case BatchType batch:
+                Collect(batch.Row, used);
+                break;
             case RecordType record:
                 foreach (var field in record.Fields)
                     Collect(field.Type, used);
@@ -411,10 +486,17 @@ public sealed partial class WireVectorTests
                 foreach (var field in union.Cases.SelectMany(c => c.Fields))
                     Collect(field.Type, used);
                 break;
+            case PrimitiveType or EnumType:
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown type {type}.");
         }
     }
 
     private static string Shorten(string line) => line.Length <= 200 ? line : line[..200] + "…";
+
+    [GeneratedRegex("^`([A-Z][A-Za-z]*)\\(([A-Za-z, ]*)\\)`$")]
+    private static partial Regex OperationCell();
 
     [GeneratedRegex("^`[0-9a-f]{2}( [0-9a-f]{2})*`$")]
     private static partial Regex LiteralBytes();

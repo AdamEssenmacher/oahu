@@ -57,6 +57,7 @@ AdamE.Oahu.Wire.OahuReader.EnterNested() -> void
 AdamE.Oahu.Wire.OahuReader.ExitNested() -> void
 AdamE.Oahu.Wire.OahuReader.OahuReader() -> void
 AdamE.Oahu.Wire.OahuReader.OahuReader(System.ReadOnlySpan<byte> input) -> void
+AdamE.Oahu.Wire.OahuReader.ReadBatch<T>(AdamE.Oahu.Wire.OahuReadFunc<T>! readRow) -> System.Collections.Generic.IReadOnlyList<AdamE.Oahu.ListOp<T>!>!
 AdamE.Oahu.Wire.OahuReader.ReadBool() -> bool
 AdamE.Oahu.Wire.OahuReader.ReadCount() -> int
 AdamE.Oahu.Wire.OahuReader.ReadDouble() -> double
@@ -77,6 +78,7 @@ AdamE.Oahu.Wire.OahuWriter.OahuWriter(int initialCapacity) -> void
 AdamE.Oahu.Wire.OahuWriter.EnterNested() -> void
 AdamE.Oahu.Wire.OahuWriter.ExitNested() -> void
 AdamE.Oahu.Wire.OahuWriter.Reset() -> void
+AdamE.Oahu.Wire.OahuWriter.WriteBatch<T>(System.Collections.Generic.IReadOnlyList<AdamE.Oahu.ListOp<T>!>! batch, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! writeRow) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteBool(bool value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteCount(int count) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteDouble(double value) -> void

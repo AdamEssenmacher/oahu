@@ -2,7 +2,7 @@
 
 A contract is what an app author writes to connect a view model to its native screen. This page describes the vocabulary a contract is written in and the rules a contract follows. The [wire format](wire-format.md) gives the bytes of the values a contract carries, and the [architecture](architecture.md) describes how the rest of Oahu uses a contract.
 
-> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, and the no-value type `OahuUnit`. Later pull requests add the encoding of a keyed list's batch, methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
+> **Status:** the vocabulary is arriving in parts. What exists now, in the `AdamE.Oahu` namespace: `[OahuContract]`, the four stream interfaces `IOahuState<T>`, `IOahuEditable<T>`, `IOahuEvents<T>` and `IOahuKeyedList<T>`, the row interface `IOahuKeyed`, the list operations `ListOp<T>`, and the no-value type `OahuUnit`. The wire format gives the bytes of a keyed list's batch, in [Keyed-list batches](wire-format.md#keyed-list-batches). Later pull requests add methods and their rules, and structural equality for contract values. Nothing implements the stream interfaces yet, nothing checks a contract and nothing is generated from one: the sources, the analyzer and the generators arrive in later milestones of the [roadmap](roadmap.md).
 
 ## What a contract is
 
@@ -159,7 +159,7 @@ Each notification of a keyed list is a **batch**: a list of operations, `IReadOn
 - **`Items` is a value.** A list that `Items` returned does not change afterwards; a later change gives a new list.
 - **Like the other streams.** Observers hear of a change in a later delivery turn, never during the call that changed the list. Disposing a subscription stops all delivery to it at once. A keyed list never completes and never fails. It is used only on the UI thread: `Items` is read there, observers subscribe and dispose there, and batches are delivered there; changing a keyed list on another thread is a fault. An exception thrown by an observer is a fault. [State and events](#state-and-events) gives these rules in full.
 
-The exporter writes each batch, the replay included, as one message, and the native model applies it all together or not at all, so the screen's list is never left half-changed. How a batch is written on the wire is the next part of the vocabulary; the [wire format](wire-format.md) does not give it yet.
+The exporter writes each batch, the replay included, as one message, and the native model applies it all together or not at all, so the screen's list is never left half-changed. The wire format's [Keyed-list batches](wire-format.md#keyed-list-batches) gives a batch's bytes.
 
 `IOahuKeyedList<T>` is invariant: a batch is a list of `ListOp<T>`, which is a record, and a class cannot vary in its type argument. So a keyed list of one row type is never a keyed list of another.
 
@@ -234,7 +234,7 @@ A stream carries values of these types. Each links to the section of the wire fo
 | [List](wire-format.md#lists) | `IReadOnlyList<T>` of any of these |
 | [No value](wire-format.md#the-no-value-type) | `OahuUnit`, only as the whole type of an events stream, as [No value](#no-value) says |
 
-A keyed list's rows are records or unions, as [Rows and keys](#rows-and-keys) says. No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
+A keyed list's rows are records or unions, as [Rows and keys](#rows-and-keys) says, and its batches are written as [Keyed-list batches](wire-format.md#keyed-list-batches) says. No other numeric type can cross. Values are immutable. Records and unions nest at most 64 deep, as [Nesting depth](wire-format.md#nesting-depth) says.
 
 ## Rules for values
 

@@ -6,6 +6,9 @@ using System.Text.RegularExpressions;
 
 namespace AdamE.Oahu.Tests.Conformance;
 
+/// <summary>One operation of a batch's value: its name in the file, its indexes and its row's value.</summary>
+internal sealed record VectorOperation(string Kind, int First, int Second, JsonNode? Item);
+
 /// <summary>
 /// The JSON representation of values in the vector file: it checks that a value matches its type and renders it in
 /// one canonical form, so two values are equal when their canonical forms are.
@@ -113,6 +116,65 @@ internal static partial class VectorValues
             "the case's fields", value);
     }
 
+    /// <summary>
+    /// The fields of each operation of a batch, in order, by the operation's name in the file: the order the harness
+    /// passes them to <see cref="ListOp{T}"/>, and so the order its writer writes them.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> OperationFields =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["insert"] = ["index", "item"],
+            ["remove"] = ["index"],
+            ["move"] = ["from", "to"],
+            ["replace"] = ["index", "item"],
+            ["clear"] = [],
+        };
+
+    /// <summary>
+    /// The operations of a batch's value: an array of objects, each with one key, the operation's name, whose value is
+    /// an object of the operation's fields in order. An index is a JSON integer, and an item is a value of the row type.
+    /// </summary>
+    public static IReadOnlyList<VectorOperation> Operations(BatchType type, JsonNode? value)
+    {
+        var array = value as JsonArray ?? throw Invalid("a batch is a JSON array of operations", value);
+        var operations = new List<VectorOperation>();
+        foreach (var node in array)
+        {
+            if (node is not JsonObject { Count: 1 } operation ||
+                !OperationFields.TryGetValue(operation.First().Key, out var names) ||
+                operation.First().Value is not JsonObject fields ||
+                !fields.Select(p => p.Key).SequenceEqual(names))
+            {
+                throw Invalid("an operation is an object with one key, insert, remove, move, replace or clear, whose " +
+                    "value is an object of the operation's fields, in order: index and item, index, from and to, " +
+                    "index and item, or none", node);
+            }
+
+            var kind = operation.First().Key;
+            // An item is checked against the row type here, so that a batch's value is checked when the file loads.
+            var item = names.Contains("item") ? fields["item"] : null;
+            if (names.Contains("item"))
+                Canonical(type.Row, item);
+
+            operations.Add(kind switch
+            {
+                "move" => new VectorOperation(kind, ToInt(fields["from"]), ToInt(fields["to"]), null),
+                "clear" => new VectorOperation(kind, 0, 0, null),
+                _ => new VectorOperation(kind, ToInt(fields["index"]), 0, item),
+            });
+        }
+
+        return operations;
+    }
+
+    /// <summary>The key of a row's value: its Key field, or the Key field of its union's case.</summary>
+    public static string RowKey(VectorType row, JsonNode? value) => row switch
+    {
+        RecordType record => ToText(Fields(record.Fields, value, record.Text)["Key"]),
+        UnionType union => ToText(UnionCase(union, value).Fields["Key"]),
+        _ => throw new InvalidOperationException($"The type {row} is not a row."),
+    };
+
     public static JsonObject Fields(IReadOnlyList<VectorField> fields, JsonNode? value, string where)
     {
         if (value is JsonObject record && record.Select(p => p.Key).SequenceEqual(fields.Select(f => f.Name)))
@@ -157,12 +219,50 @@ internal static partial class VectorValues
             case EnumType @enum:
                 builder.Append(VectorFileLayout.Quote(@enum.Values[EnumIndex(@enum, value)]));
                 break;
+            case BatchType batch:
+                builder.Append('[');
+                var operations = Operations(batch, value);
+                for (var i = 0; i < operations.Count; i++)
+                {
+                    if (i > 0)
+                        builder.Append(", ");
+                    AppendOperation(builder, batch.Row, operations[i]);
+                }
+
+                builder.Append(']');
+                break;
             case PrimitiveType primitive:
                 AppendPrimitive(builder, primitive.Kind, value);
                 break;
             default:
                 throw new InvalidOperationException($"Unknown type {type}.");
         }
+    }
+
+    private static void AppendOperation(StringBuilder builder, VectorType row, VectorOperation operation)
+    {
+        builder.Append('{').Append(VectorFileLayout.Quote(operation.Kind)).Append(": {");
+        switch (operation.Kind)
+        {
+            case "insert" or "replace":
+                builder.Append("\"index\": ").Append(operation.First.ToString(CultureInfo.InvariantCulture))
+                    .Append(", \"item\": ");
+                Append(builder, row, operation.Item);
+                break;
+            case "remove":
+                builder.Append("\"index\": ").Append(operation.First.ToString(CultureInfo.InvariantCulture));
+                break;
+            case "move":
+                builder.Append("\"from\": ").Append(operation.First.ToString(CultureInfo.InvariantCulture))
+                    .Append(", \"to\": ").Append(operation.Second.ToString(CultureInfo.InvariantCulture));
+                break;
+            case "clear":
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown operation {operation.Kind}.");
+        }
+
+        builder.Append("}}");
     }
 
     private static void AppendFields(StringBuilder builder, IReadOnlyList<VectorField> fields, JsonObject value)

@@ -437,6 +437,124 @@ public ref struct OahuReader
     }
 
     /// <summary>
+    /// Reads a keyed list's batch: the number of operations, written as a count, followed by each operation in order,
+    /// its tag and then its payload. A row is read by <paramref name="readRow"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tag is read as a variable-length integer, as an enum's index is, so a longer form than the shortest is
+    /// accepted: 0 is an insert, 1 a remove, 2 a move, 3 a replace and 4 a clear. An insert or a replace is its index,
+    /// then its row; a remove, its index; a move, its from index, then its to index; a clear, nothing. Each index is read
+    /// as a count.
+    /// </para>
+    /// <para>
+    /// A batch has at least one operation, so a count of 0 is rejected. Every operation takes at least one byte, its
+    /// tag, so a count larger than the bytes that remain after it is rejected before anything is allocated.
+    /// </para>
+    /// <para>
+    /// The method does not check whether an index is in range for the list, or whether keys stay unique: that depends
+    /// on the list the batch applies to, and whoever applies the batch checks it there.
+    /// </para>
+    /// <para>
+    /// A batch and its operations do not add nesting depth and do not call <see cref="EnterNested"/>: a row is a record
+    /// or a union, and its codec does that itself. After each row, the method throws
+    /// <see cref="InvalidOperationException"/> if the row left the depth different from what it was before it. That is a
+    /// fault in the row's codec, not in the input.
+    /// </para>
+    /// <para>
+    /// The operations are returned in an array of exactly the count's length. Apart from what
+    /// <paramref name="readRow"/> allocates for the rows, that array and one <see cref="ListOp{T}"/> for each operation
+    /// are the only allocations. Pass a method group of a static method or a <see langword="static"/> lambda for
+    /// <paramref name="readRow"/>, so that the delegate is created once and cached.
+    /// </para>
+    /// <para>
+    /// When the count is rejected, the reader stays where it was, at the start of the batch. When an operation is
+    /// malformed, the operations before it have been read and the reader is not used again; when its tag is rejected,
+    /// the reader is at the start of that tag. If <paramref name="readRow"/> throws, the exception propagates.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The type of a row.</typeparam>
+    /// <param name="readRow">Reads one row from the reader it is given.</param>
+    /// <returns>The operations read, in order, at least one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="readRow"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OahuFormatException">
+    /// The count is malformed, as for <see cref="ReadCount"/>, it is 0, or it is larger than the bytes that remain after
+    /// it; a tag is malformed, as for <see cref="ReadVarUInt"/>, or larger than 4; or an index is malformed, as for
+    /// <see cref="ReadCount"/>. <paramref name="readRow"/> may throw it too, for a malformed row.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">A row left the nesting depth different from what it was before it.</exception>
+    public IReadOnlyList<ListOp<T>> ReadBatch<T>(OahuReadFunc<T> readRow)
+        where T : IOahuKeyed
+    {
+        ArgumentNullException.ThrowIfNull(readRow);
+
+        var start = _offset;
+        var count = ReadCount();
+        if (count == 0)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The batch at byte offset {start} has no operations, and every batch has at least one.", start);
+        }
+
+        var available = _input.Length - _offset;
+        if (count > available)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The batch at byte offset {start} has {count} operation(s), but only {available} byte(s) remain " +
+                "after its count, and every operation takes at least one byte.",
+                start);
+        }
+
+        var depth = _depth;
+        var operations = new ListOp<T>[count];
+        for (var i = 0; i < operations.Length; i++)
+        {
+            var tagStart = _offset;
+            var tag = ReadVarUInt();
+
+            // C# evaluates arguments from left to right, so an index is read before the row that follows it, and a
+            // move's From before its To.
+            operations[i] = tag switch
+            {
+                OahuFormat.InsertTag => new ListOp<T>.Insert(ReadCount(), ReadRow(readRow, start, depth)),
+                OahuFormat.RemoveTag => new ListOp<T>.Remove(ReadCount()),
+                OahuFormat.MoveTag => new ListOp<T>.Move(ReadCount(), ReadCount()),
+                OahuFormat.ReplaceTag => new ListOp<T>.Replace(ReadCount(), ReadRow(readRow, start, depth)),
+                OahuFormat.ClearTag => new ListOp<T>.Clear(),
+                _ => throw UnknownTag(tag, tagStart),
+            };
+        }
+
+        return operations;
+    }
+
+    // Puts the reader back at the start of a tag it rejects, and returns the error to throw.
+    private OahuFormatException UnknownTag(ulong tag, int tagStart)
+    {
+        _offset = tagStart;
+        return new OahuFormatException(
+            $"The operation tag {tag} at byte offset {tagStart} is not one of the tags of the five operations, 0 to " +
+            $"{OahuFormat.ClearTag}.",
+            tagStart);
+    }
+
+    // Reads the row of an insert or a replace, and checks that it left the depth as it was, as ReadList checks an item.
+    private T ReadRow<T>(OahuReadFunc<T> readRow, int batchStart, int depth)
+    {
+        var row = readRow(ref this);
+        if (_depth != depth)
+        {
+            throw new InvalidOperationException(
+                $"A row of the batch at byte offset {batchStart} left the nesting depth at {_depth}, not {depth} as " +
+                "before it. Every row must call ExitNested once for each EnterNested.");
+        }
+
+        return row;
+    }
+
+    /// <summary>
     /// Enters a record or union value: raises the nesting depth by one, and rejects the value if that takes the depth
     /// past <see cref="OahuFormat.MaxNestingDepth"/>.
     /// </summary>

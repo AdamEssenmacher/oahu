@@ -74,6 +74,7 @@ internal sealed class WireFormatPage
 
         Sections = sections;
         MalformedInput = malformed;
+        TableRows = rows;
         ByteTableRows = rows.Where(row => row.Header.Contains("Bytes")).ToList();
     }
 
@@ -88,6 +89,9 @@ internal sealed class WireFormatPage
 
     /// <summary>The bullets of the "Malformed input" section, in order.</summary>
     public IReadOnlyList<string> MalformedInput { get; }
+
+    /// <summary>Every row of every table, apart from header and separator rows.</summary>
+    public IReadOnlyList<PageTableRow> TableRows { get; }
 
     /// <summary>Every row of every table with a "Bytes" column.</summary>
     public IReadOnlyList<PageTableRow> ByteTableRows { get; }

@@ -73,8 +73,8 @@ namespace AdamE.Oahu;
 /// <para>
 /// What the exporter and the native model do, which is not the implementation's work: the exporter writes each batch,
 /// the replay included, as one message, and the native model applies the message all together or not at all, so the
-/// screen's list is never left half-changed. The encoding of a batch is part of the wire format and is not specified
-/// yet.
+/// screen's list is never left half-changed. The wire format's keyed-list batches give a batch's bytes;
+/// <see cref="Wire.OahuWriter.WriteBatch{T}"/> writes them and <see cref="Wire.OahuReader.ReadBatch{T}"/> reads them.
 /// </para>
 /// </remarks>
 /// <typeparam name="T">

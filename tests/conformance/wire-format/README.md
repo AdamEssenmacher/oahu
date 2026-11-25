@@ -21,11 +21,12 @@ Each entry of `reasons`, `refusals`, `types` and `vectors` is on one line.
 Each vector names the type of its value with a type expression:
 
 ```text
+whole  = type | "batch<" declared ">"
 type   = single [ "?" ]
 single = "list<" type ">" | primitive | declared
 ```
 
-There is no whitespace. `T?` is a nullable `T`; `T` is never itself nullable, so `int??` is not a type. `list<T>` is a list of `T`. A declared name is a name from `types`, and starts with a capital letter. The primitives are:
+A vector's type is a `whole`; a field's type is a `type`. There is no whitespace. `T?` is a nullable `T`; `T` is never itself nullable, so `int??` is not a type. `list<T>` is a list of `T`. `batch<Row>` is a keyed list's batch of rows of `Row`, which is a declared record or union that has a field named `Key` of type `string`, on the record or on every case. A batch appears only as a vector's whole type, never inside another type, and is never nullable, because a batch is a keyed list's message, not a value of a contract. A declared name is a name from `types`, and starts with a capital letter. The primitives are:
 
 | Primitive | The page's section |
 | --- | --- |
@@ -67,6 +68,7 @@ A value is written in JSON by its type:
 | A record | An object with each field's value under its name, in the record's order, such as `{"X": 1, "Y": -1}`. A record with no fields is `{}`. |
 | An enum | The value's name, such as `"Normal"` |
 | A union | An object with one key, the case's name, whose value is the case's fields as for a record, such as `{"Failed": {"Message": "x"}}` or `{"Loading": {}}` |
+| `batch<Row>` | An array of the operations, in order. Each operation is an object with one key, its name, whose value is an object of its fields in this order: `{"insert": {"index": 0, "item": row}}`, `{"remove": {"index": 1}}`, `{"move": {"from": 0, "to": 2}}`, `{"replace": {"index": 0, "item": row}}` or `{"clear": {}}`. An index is a JSON integer, and a row is a value of `Row`. A refuse vector can hold an empty array or a negative index; no other vector does. |
 
 Large integers are strings and doubles are bit patterns so that every JSON parser reads them exactly. The no-value type's value is `null`, JSON's own value that carries nothing; it cannot be mistaken for an absent value, because `unit` is never nullable, and `{}` would look like a record with no fields, which is a different type. A string is an array of code units only when it holds a lone surrogate, which a JSON string cannot carry safely.
 
@@ -76,7 +78,7 @@ Two values are equal when they have the same type and the same value: doubles by
 
 Every vector has a `name`, a `type` and a `kind`. The name is its section, a dot and a name within the section, such as `varuint.128` or `string.overlong-2-byte`. Bytes are lowercase hex with no separators; `""` is no bytes. A vector may have a `note`, a sentence for people, and a `doc`, which names the row of a table on the page that it gives; a harness ignores both. A `doc` is the title of the page's `##` section that holds the table, a colon and a space, then the row's first cell exactly as the page writes it, Markdown included, such as `Signed integers: -1` or ``Strings: `Milk` ``. Only rows of tables with a Bytes column are named, each by exactly one vector.
 
-To write a value, a harness writes it as a message: the value alone, in a new writer. To read bytes, it reads one value of the type from the start of the bytes and then checks that the input has ended, as a reader of a message does. It reads and writes records and unions through its own codec calls for them, so that nesting depth is counted as the page says.
+To write a value, a harness writes it as a message: the value alone, in a new writer. To read bytes, it reads one value of the type from the start of the bytes and then checks that the input has ended, as a reader of a message does. It reads and writes records and unions through its own codec calls for them, so that nesting depth is counted as the page says. It writes and reads a batch with its implementation's batch writer and reader, and each row through its codec for the row type.
 
 | Kind | Fields | A harness checks |
 | --- | --- | --- |
@@ -102,11 +104,13 @@ A harness must check the cause of every reject vector. It maps its reader's fail
 Each reject vector has one thing wrong with it, or more than one where the page fixes which is reported first, so every implementation rejects it for the same cause. These have more than one, or could be read two ways:
 
 - `string.length-2147483648` and `list.count-2147483648` have a length or count above 2,147,483,647 that is also longer than the input. The page's [Counts](../../../docs/wire-format.md#counts) says a reader checks that a count is a valid count before it compares it with the bytes that remain, so both are `count-too-large`.
+- `batch.count-2147483648` has a count above 2,147,483,647 that is also longer than the input, so it is `count-too-large`, as for a list.
+- `batch.count-0-then-clear` has a count of 0 and then the bytes of an operation. The count is 0, so it is `batch-empty`; the byte after it is never read, so it is not `leftover-bytes`.
 - `varuint.10-continuation-bytes` is ten bytes with their high bits set, and the input ends there. The page's [Variable-length integers](../../../docs/wire-format.md#variable-length-integers) says a tenth byte with its high bit set makes the integer longer than 10 bytes, whatever follows, so it is `varuint-too-long`, not `varuint-truncated`.
 
 ### Refusals
 
-An entry of `refusals` has a `code` and a `rule`, a sentence quoted from the page. A refuse vector's `reason` is one of these codes: `negative-count` for a count below 0, and `too-deep` for a value at nesting depth 65.
+An entry of `refusals` has a `code` and a `rule`, a sentence quoted from the page. A refuse vector's `reason` is one of these codes: `negative-count` for a count below 0, including a batch's negative index, `empty-batch` for a batch with no operations, and `too-deep` for a value at nesting depth 65.
 
 ## What the file does not cover
 
@@ -119,6 +123,7 @@ These parts of the page are left to each implementation's own tests, because a v
 - Writing a signalling NaN, which a runtime may quieten before the writer sees it. The file only reads one.
 - The details of an error: its message, its byte offset, and where the reader is left.
 - Faults in a codec rather than in the input, such as a record codec that enters a nesting level without leaving it.
+- A batch with a null operation, or an insert or a replace with a null row, which a writer refuses. The file's operations and rows are never null.
 
 ## Changing the file
 
@@ -128,6 +133,7 @@ A change to the wire format changes the page, this file and the code together, i
 - Every `refusals` rule is quoted from the page.
 - The harness knows each of the page's `##` sections and which vector sections belong to it. Vector names are unique, and grouped by section in the order of the page's `##` headings, so moving or renaming a section on the page fails a test.
 - Every row of each table on the page with a Bytes column has exactly one vector whose `doc` names it, and no `doc` names anything else. Where the row lists its bytes, or says it is no bytes, the vector has exactly those bytes. The harness names the few rows that describe their bytes in words; any other row must list its bytes or say it is no bytes, so a mistyped byte fails a test, and so does a named row the page no longer has. A number in the row's Value, Milliseconds or Ticks column is the vector's value; a Zigzag value is the zigzag encoding of the vector's value and the value of its bytes; an instant in the Instant column is the vector's milliseconds. A table with a Bytes column that has a column the harness does not know fails a test.
+- The operations table of the page's [Keyed-list batches](../../../docs/wire-format.md#keyed-list-batches) has exactly the five operations. Each row's tag is the C# writer's tag for that operation and the row's position in the table, and its payload lists the operation's arguments in the order of the row's first cell, of the parameters of the C# `ListOp<T>` case, and of the operation's fields in this file. The batch vectors check that the writer and reader follow that order.
 - Every declared type is used by a vector.
 - The file is in its layout, one entry per line, and the depth vectors are the generated ones.
 
@@ -138,7 +144,7 @@ These are not checked by machine, and a reviewer reads them:
 - The bytes of a row that the harness names as describing them in words, such as "`80 01`, then 128 bytes of `61`". Its vector is matched to the row by `doc` only.
 - A Duration cell, which is words, such as "One day".
 - The order of vectors within a section.
-- The page's prose, apart from the Malformed input list and the quoted refusals. A rule stated only in prose has a vector only if someone wrote one.
+- The page's prose, apart from the Malformed input list, the quoted refusals and the operations table. A rule stated only in prose has a vector only if someone wrote one.
 
 The vectors of the nesting depth section, whose names start with `depth.`, are generated by `DepthVectors.cs` in the C# harness, because their values nest 64 levels deep. It builds their bytes by repeating each level's bytes, worked out from the page, not with `OahuWriter`. To change them, or to put the file back in its layout after editing it by hand, run the C# tests with the environment variable `OAHU_WRITE_VECTORS` set to `1`; the test of the layout then rewrites the file instead of checking it. Run the tests again without it, and review the change to the file.
 

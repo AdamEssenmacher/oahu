@@ -113,7 +113,69 @@ public sealed class HarnessCheckTests
         Assert.Throws<InvalidDataException>(() => VectorValues.Canonical(unit, JsonNode.Parse(json)));
     }
 
+    [Theory]
+    [InlineData("list<batch<Keyed>>", "batch is allowed only as a vector's whole type")]
+    [InlineData("batch<Keyed>?", "batch cannot be nullable")]
+    [InlineData("batch<Keyed?>", "the row type Keyed? is not a record or a union whose record or every case has a string field named Key")]
+    [InlineData("batch<string>", "the row type string is not a record or a union whose record or every case has a string field named Key")]
+    [InlineData("batch<NoKey>", "the row type NoKey is not a record or a union whose record or every case has a string field named Key")]
+    [InlineData("batch<IntKey>", "the row type IntKey is not a record or a union whose record or every case has a string field named Key")]
+    [InlineData("batch<HalfKeyed>", "the row type HalfKeyed is not a record or a union whose record or every case has a string field named Key")]
+    public void A_batch_is_only_a_vector_s_whole_type_of_rows_with_a_string_key(string type, string problem)
+    {
+        var error = Assert.Throws<InvalidDataException>(() => VectorTypeParser.Parse(type, RowTypes, wholeType: true));
+
+        Assert.Equal($"The type expression \"{type}\" is not valid: {problem}.", error.Message);
+    }
+
+    [Fact]
+    public void A_batch_is_not_a_record_s_field()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => ParseTypes(
+            """[{"name": "Keyed", "record": [{"name": "Key", "type": "string"}]}, {"name": "A", "record": [{"name": "B", "type": "batch<Keyed>"}]}]"""));
+
+        Assert.Equal(
+            "The type expression \"batch<Keyed>\" is not valid: batch is allowed only as a vector's whole type.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("""[{"Insert": {"index": 0, "item": {"Key": "k"}}}]""")]
+    [InlineData("""[{"insert": {"item": {"Key": "k"}, "index": 0}}]""")]
+    [InlineData("""[{"insert": {"index": 0}}]""")]
+    [InlineData("""[{"insert": {"index": 0, "item": null}}]""")]
+    [InlineData("""[{"remove": {"index": "0"}}]""")]
+    [InlineData("""[{"clear": {}, "remove": {"index": 0}}]""")]
+    [InlineData("""[{"clear": null}]""")]
+    [InlineData("""[{"swap": {}}]""")]
+    [InlineData("""[null]""")]
+    [InlineData("""{"clear": {}}""")]
+    public void A_batch_value_that_is_not_a_list_of_known_operations_is_rejected(string json)
+    {
+        var batch = VectorTypeParser.Parse("batch<Keyed>", RowTypes, wholeType: true);
+
+        Assert.Throws<InvalidDataException>(() => VectorValues.Canonical(batch, JsonNode.Parse(json)));
+    }
+
+    [Fact]
+    public void A_batch_value_has_one_canonical_form()
+    {
+        var batch = VectorTypeParser.Parse("batch<Keyed>", RowTypes, wholeType: true);
+        var json = """[{"insert": {"index": 0, "item": {"Key": "k"}}}, {"remove": {"index": 1}}, {"move": {"from": 2, "to": 3}}, {"replace": {"index": 4, "item": {"Key": "j"}}}, {"clear": {}}]""";
+
+        Assert.Equal(json, VectorValues.Canonical(batch, JsonNode.Parse(json)));
+    }
+
     private static readonly Dictionary<string, VectorType> NoTypes = [];
+
+    private static readonly Dictionary<string, VectorType> RowTypes = ParseTypes(
+        """
+        [
+          {"name": "Keyed", "record": [{"name": "Key", "type": "string"}]},
+          {"name": "NoKey", "record": [{"name": "Name", "type": "string"}]},
+          {"name": "IntKey", "record": [{"name": "Key", "type": "int"}]},
+          {"name": "HalfKeyed", "union": [{"name": "A", "fields": [{"name": "Key", "type": "string"}]}, {"name": "B", "fields": []}]}
+        ]
+        """);
 
     private static Dictionary<string, VectorType> ParseTypes(string json) =>
         VectorFile.ParseTypes(JsonNode.Parse(json) as JsonArray ?? throw new InvalidOperationException("Not an array."));

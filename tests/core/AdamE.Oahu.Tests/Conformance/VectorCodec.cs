@@ -12,7 +12,8 @@ namespace AdamE.Oahu.Tests.Conformance;
 /// It calls the writer and reader as generated codecs do. A record calls <c>EnterNested</c>, writes or reads its fields
 /// and calls <c>ExitNested</c>; a union calls <c>EnterNested</c> once, then the index method, then the case's fields,
 /// then <c>ExitNested</c>; an enum calls only the index method. Lists and nullable values add no depth. The no-value
-/// type writes and reads nothing and calls nothing.
+/// type writes and reads nothing and calls nothing. A batch is written and read with <c>WriteBatch</c> and
+/// <c>ReadBatch</c>, whose rows are records or unions written and read as above.
 /// </remarks>
 internal static class VectorCodec
 {
@@ -58,6 +59,10 @@ internal static class VectorCodec
                 break;
             case EnumType @enum:
                 writer.WriteIndex(VectorValues.EnumIndex(@enum, value), @enum.Values.Count);
+                break;
+            case BatchType batch:
+                var operations = VectorValues.Operations(batch, value).Select(op => ToListOp(batch.Row, op)).ToArray();
+                writer.WriteBatch(operations, (w, row) => Write(w, batch.Row, row.Value));
                 break;
             case PrimitiveType primitive:
                 WritePrimitive(writer, primitive.Kind, value);
@@ -136,12 +141,40 @@ internal static class VectorCodec
                 return new JsonObject { [@case.Name] = caseValue };
             case EnumType @enum:
                 return JsonValue.Create(@enum.Values[reader.ReadIndex(@enum.Values.Count)]);
+            case BatchType batch:
+                var rowType = batch.Row;
+                var read = reader.ReadBatch((ref OahuReader r) => VectorRow.Of(rowType, Read(ref r, rowType)));
+                return new JsonArray([.. read.Select(OperationNode)]);
             case PrimitiveType primitive:
                 return ReadPrimitive(ref reader, primitive.Kind);
             default:
                 throw new InvalidOperationException($"Unknown type {type}.");
         }
     }
+
+    private static ListOp<VectorRow> ToListOp(VectorType rowType, VectorOperation operation) => operation.Kind switch
+    {
+        "insert" => new ListOp<VectorRow>.Insert(operation.First, VectorRow.Of(rowType, operation.Item)),
+        "remove" => new ListOp<VectorRow>.Remove(operation.First),
+        "move" => new ListOp<VectorRow>.Move(operation.First, operation.Second),
+        "replace" => new ListOp<VectorRow>.Replace(operation.First, VectorRow.Of(rowType, operation.Item)),
+        "clear" => new ListOp<VectorRow>.Clear(),
+        _ => throw new InvalidOperationException($"Unknown operation {operation.Kind}."),
+    };
+
+    // The file's form of an operation read. The switch names the five cases of the closed ListOp<T> and has no
+    // discard arm, so a case it does not handle is a compile error.
+    private static JsonObject OperationNode(ListOp<VectorRow> operation) => operation switch
+    {
+        ListOp<VectorRow>.Insert insert =>
+            new() { ["insert"] = new JsonObject { ["index"] = insert.Index, ["item"] = insert.Item.Value } },
+        ListOp<VectorRow>.Remove remove => new() { ["remove"] = new JsonObject { ["index"] = remove.Index } },
+        ListOp<VectorRow>.Move move =>
+            new() { ["move"] = new JsonObject { ["from"] = move.From, ["to"] = move.To } },
+        ListOp<VectorRow>.Replace replace =>
+            new() { ["replace"] = new JsonObject { ["index"] = replace.Index, ["item"] = replace.Item.Value } },
+        ListOp<VectorRow>.Clear => new() { ["clear"] = new JsonObject() },
+    };
 
     private static JsonObject ReadFields(ref OahuReader reader, IReadOnlyList<VectorField> fields)
     {
@@ -188,4 +221,14 @@ internal static class VectorCodec
 
     private static JsonValue Decimal<T>(T value)
         where T : IFormattable => JsonValue.Create(value.ToString(null, CultureInfo.InvariantCulture));
+
+    // A row of a batch: its value in the file's JSON, and its key, taken from its Key field.
+    private sealed class VectorRow(JsonNode? value, string key) : IOahuKeyed
+    {
+        public JsonNode? Value { get; } = value;
+
+        public string Key { get; } = key;
+
+        public static VectorRow Of(VectorType rowType, JsonNode? value) => new(value, VectorValues.RowKey(rowType, value));
+    }
 }
