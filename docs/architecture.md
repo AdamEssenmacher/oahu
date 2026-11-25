@@ -28,7 +28,7 @@ A contract has **streams**, which carry values from the view model to the screen
 
 A member is a **method**, returning `void` or `Task` and taking at most one value, or an **edit** to an editable. A `Task` method may also take a trailing `CancellationToken`. Members return nothing to the screen. A screen learns the result of a call the way it learns everything else: from the streams.
 
-The values in a contract are immutable: booleans, the numbers `int`, `long` and `double`, strings, instants (`DateTimeOffset`), durations (`TimeSpan`), enums, records, unions of records, nullable values and lists of these. They compare by structure.
+The values in a contract are immutable: booleans, the numbers `int`, `long` and `double`, strings, instants (`DateTimeOffset`), durations (`TimeSpan`), enums, records, unions of records, nullable values and lists of these. They compare by structure. [Contracts](contracts.md) lists them and the rules they follow.
 
 The **view model** is an ordinary C# class that implements the contract. It knows nothing about its screen (it cannot tell whether one is attached, visible or covered) and it runs in a plain unit test with no device.
 

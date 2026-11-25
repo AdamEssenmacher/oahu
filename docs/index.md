@@ -5,3 +5,4 @@ Oahu is under construction, and nothing is published yet. Guides and API documen
 - [Architecture](architecture.md): the design, the path of one change, the wire format and the fixed interface, the layers in build order, package boundaries and invariants.
 - [Roadmap](roadmap.md): the order in which Oahu is being built, and what is done.
 - [Wire format](wire-format.md): the bytes that carry values between C# and native code.
+- [Contracts](contracts.md): the vocabulary a contract is written in, the values it carries and the rules they follow.
