@@ -6,3 +6,4 @@ Oahu is under construction, and nothing is published yet. Guides and API documen
 - [Roadmap](roadmap.md): the order in which Oahu is being built, and what is done.
 - [Wire format](wire-format.md): the bytes that carry values between C# and native code.
 - [Contracts](contracts.md): the vocabulary a contract is written in, the values it carries and the rules they follow.
+- [The loop](loop.md): delivery turns, when they run and in what order, faults, and one loop per thread.
