@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 using System.Text.Unicode;
 
@@ -18,6 +19,10 @@ namespace AdamE.Oahu.Wire;
 public ref struct OahuReader
 {
     private const int MaxVarUIntBytes = 10;
+
+    // DateTimeOffset.MinValue and MaxValue, in whole milliseconds since the Unix epoch.
+    private const long MinInstantMilliseconds = -62_135_596_800_000;
+    private const long MaxInstantMilliseconds = 253_402_300_799_999;
 
     private readonly ReadOnlySpan<byte> _input;
     private int _offset;
@@ -187,6 +192,46 @@ public ref struct OahuReader
         _offset = start + sizeof(double);
         return BitConverter.Int64BitsToDouble(bits);
     }
+
+    /// <summary>
+    /// Reads an instant: milliseconds since the Unix epoch, 1970-01-01T00:00:00Z, written as a <see cref="long"/>.
+    /// </summary>
+    /// <remarks>
+    /// The value must be in the range a <see cref="DateTimeOffset"/> holds, from 0001-01-01T00:00:00Z to
+    /// 9999-12-31T23:59:59.999Z. The format does not carry an offset, so the value returned is always in UTC, with an
+    /// offset of zero.
+    /// </remarks>
+    /// <returns>The instant read, with an offset of zero.</returns>
+    /// <exception cref="OahuFormatException">
+    /// The integer is malformed, as for <see cref="ReadLong"/>, or the instant is outside the range of
+    /// <see cref="DateTimeOffset"/>.
+    /// </exception>
+    public DateTimeOffset ReadInstant()
+    {
+        var start = _offset;
+        var milliseconds = ReadLong();
+        if (milliseconds is < MinInstantMilliseconds or > MaxInstantMilliseconds)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The instant at byte offset {start} is {milliseconds.ToString(CultureInfo.InvariantCulture)} " +
+                "milliseconds from the Unix epoch, outside the range from " +
+                $"{MinInstantMilliseconds.ToString(CultureInfo.InvariantCulture)} (0001-01-01T00:00:00Z) to " +
+                $"{MaxInstantMilliseconds.ToString(CultureInfo.InvariantCulture)} (9999-12-31T23:59:59.999Z).",
+                start);
+        }
+
+        return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+    }
+
+    /// <summary>Reads a duration: a count of 100-nanosecond ticks, written as a <see cref="long"/>.</summary>
+    /// <remarks>
+    /// Every <see cref="long"/> is a valid duration, so every <see cref="TimeSpan"/> from <see cref="TimeSpan.MinValue"/>
+    /// to <see cref="TimeSpan.MaxValue"/> can be read.
+    /// </remarks>
+    /// <returns>The duration read.</returns>
+    /// <exception cref="OahuFormatException">The integer is malformed, as for <see cref="ReadLong"/>.</exception>
+    public TimeSpan ReadDuration() => new(ReadLong());
 
     /// <summary>
     /// Reads a string: its UTF-8 byte length, written as a count, followed by that many bytes of strict UTF-8.
