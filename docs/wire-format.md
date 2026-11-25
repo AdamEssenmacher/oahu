@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the whole format except the batches of a keyed list, which the next part of the contract vocabulary, milestone 2 of the [roadmap](roadmap.md), adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, the no-value type, enums, unions and the nesting depth of records and unions.
+This page covers the whole format: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, the no-value type, enums, unions, the batches of a keyed list and the nesting depth of records and unions.
 
 ## Messages
 
@@ -204,7 +204,7 @@ A list is the number of its items as a count, then each item in order. Each item
 | One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 | 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
 
-Every item of a list takes at least one byte. The [contract rules](contracts.md#rules-for-values) forbid an item type whose values are no bytes: a record that is no bytes, as [Records](#records) defines it, and the [no-value type](#the-no-value-type). So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
+Every item of a list takes at least one byte. The [contract rules](contracts.md#rules-for-values) forbid an item type whose values are no bytes: a record that is no bytes, as [Records](#records) defines it, and the [no-value type](#the-no-value-type). So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input. A [keyed-list batch](#keyed-list-batches)'s array of operations likewise has at most one entry for each byte left after its count, so a batch keeps the total linear too.
 
 Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
 
@@ -345,11 +345,70 @@ Adding, removing or reordering a record's fields, an enum's values or a union's 
 
 In C#, `OahuWriter.WriteIndex` writes the index of an enum's value or a union's case, and `OahuReader.ReadIndex` reads it. Both take the number of the type's values or cases. `WriteIndex` throws `ArgumentOutOfRangeException` for an index that is negative or not below that number, and both throw it for a number below 1, since a type with no values or cases has no value to write. `ReadIndex` throws `OahuFormatException` for an index that is not below the number, so the codec that maps the index to its value or case never sees one out of range. An enum's codec calls only these. A union's codec calls `EnterNested`, then the index method, then reads or writes the case's fields, then calls `ExitNested`, as [Nesting depth](#nesting-depth) says.
 
+## Keyed-list batches
+
+A keyed list's message is a batch: a list of operations, `ListOp<T>`, as [Keyed lists](contracts.md#keyed-lists) describes. Each operation is one of five cases, and its rows are of the list's row type, a record or a union with a `Key` field.
+
+A batch is the number of its operations as a count, then each operation in order. An operation is its tag, then its payload. The tag says which operation it is, and is written as a variable-length integer, as an enum's index is: it is the operation's position in this table, counting from 0. The payload is the operation's indexes and row, in the order of the table, with nothing before, between or after them. Each index is written as a count. A row is written as a value of its type would be. There is nothing between the operations and nothing after the last one. Case names are never written.
+
+| Operation | Tag | Payload |
+| --- | --- | --- |
+| `Insert(Index, Item)` | 0 | `Index`, then `Item` |
+| `Remove(Index)` | 1 | `Index` |
+| `Move(From, To)` | 2 | `From`, then `To` |
+| `Replace(Index, Item)` | 3 | `Index`, then `Item` |
+| `Clear()` | 4 | Nothing |
+
+A tag is from 0 to 4, so a writer writes it as one byte, `00` to `04`. A reader accepts a tag in a longer form than the shortest, as it accepts an enum's index: `80 00` is read as tag 0, an insert, and `84 00` as tag 4, a clear.
+
+For these types, the first in the notation of [Records](#records) and the second as in [Unions](#unions):
+
+```text
+record TaskRow(string Key, string Text, bool Done);
+union Row = Header(string Key, string Title) | Line(string Key, string Text);
+```
+
+Both are rows, as [Rows and keys](contracts.md#rows-and-keys) says: `TaskRow` and each case of `Row` implement `IOahuKeyed` through their `Key`. `TaskRow("a", "Milk", false)` is `01 61 04 4d 69 6c 6b 00`, and `TaskRow("b", "Eggs", true)` is `01 62 04 45 67 67 73 01`.
+
+| Value | Bytes |
+| --- | --- |
+| A batch of `Insert(0, TaskRow("a", "Milk", false))` | `01 00 00 01 61 04 4d 69 6c 6b 00` |
+| A batch of `Remove(2)` | `01 01 02` |
+| A batch of `Move(0, 2)` | `01 02 00 02` |
+| A batch of `Replace(1, TaskRow("b", "Eggs", true))` | `01 03 01 01 62 04 45 67 67 73 01` |
+| A batch of `Clear()` | `01 04` |
+| `Clear()`, `Insert(0, TaskRow("a", "Milk", false))`, `Insert(1, TaskRow("b", "Eggs", true))`, `Move(1, 0)`, `Replace(1, TaskRow("a", "Milk", true))`, `Remove(0)` | `06 04 00 00 01 61 04 4d 69 6c 6b 00 00 01 01 62 04 45 67 67 73 01 02 01 00 03 01 01 61 04 4d 69 6c 6b 01 01 00` |
+| A batch of `Row`s: `Insert(0, Header("h", "Today"))` | `01 00 00 00 01 68 05 54 6f 64 61 79` |
+| A batch of `Row`s: `Replace(0, Line("l", ""))` | `01 03 00 01 01 6c 00` |
+
+An index of 128 or more takes two bytes or more: a batch of `Remove(128)` is `01 01 80 01`.
+
+When an observer subscribes, a keyed list replays its rows as one batch: a `Clear()`, then an `Insert` of each row, in order, at indexes 0, 1, 2 and on. For an empty list, the replay is a `Clear()` alone.
+
+| Value | Bytes |
+| --- | --- |
+| The replay of a list of `TaskRow("a", "Milk", false)` and `TaskRow("b", "Eggs", true)` | `03 04 00 00 01 61 04 4d 69 6c 6b 00 00 01 01 62 04 45 67 67 73 01` |
+| The replay of an empty list | `01 04` |
+
+A batch has at least one operation. A delivered batch is never empty, and an empty list is replayed as a `Clear()`, so a batch with no operations is never sent, and the format gives it no bytes. A writer refuses a batch with no operations. A reader rejects a batch whose count is 0. So every message of a keyed list is at least two bytes.
+
+Each index is written as a count, so a writer refuses a negative index, as it refuses any negative count. A reader reads an index as a count: it rejects one larger than 2,147,483,647, and accepts a longer form than the shortest.
+
+Every operation takes at least one byte, its tag. So a batch's count is never larger than the number of bytes left after it, and a reader rejects a count that is, as it does a list's count in [Lists](#lists). It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says, and it checks the count before it makes room for the operations. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows, and a message of a few bytes cannot make a reader allocate room for two billion operations.
+
+A row is never no bytes: its `Key` is a string, and a string is at least one byte. So a list of rows is a list that [Lists](#lists) allows, and an insert or a replace is at least three bytes. The count check does not rely on it, because the tag alone is a byte.
+
+A reader checks only the bytes. It does not check that an index is in range for the list, that a move's indexes are, that an insert adds a key the list does not have, or that a replace keeps the key of the row it replaces. Those depend on the list the batch applies to, so whoever applies the batch checks them there, and refuses the whole batch if one fails, as [Batches](contracts.md#batches) says. A batch whose bytes are well formed is read, whatever its indexes and keys.
+
+A batch and its operations are not records or unions of a contract, so they add no nesting depth, as [Nesting depth](#nesting-depth) says. A row is a record or a union, so a row of a batch is at depth 1, as a record that is a message's value is.
+
+In C#, `OahuWriter.WriteBatch` and `OahuReader.ReadBatch` take a delegate that writes or reads one row, and the row type is an `IOahuKeyed`. Pass a method group of a static method or a `static` lambda, so the delegate is created once. `WriteBatch` reads the batch's `Count` once and allocates nothing. It throws `ArgumentNullException` for a null batch or delegate and `ArgumentException` for an empty batch, before it writes anything. It reads each operation once and checks it just before writing it: it throws `ArgumentException` for a null operation or the null row of an insert or a replace, and `ArgumentOutOfRangeException` for a negative index. After each row, it throws `InvalidOperationException` if the delegate reset the writer or left the nesting depth different from what it was before that row. If an operation fails its check, the delegate throws, or a row fails these checks, the exception propagates. The operations before it have then been written, and the writer's contents are unspecified, so reset it before writing another message, as for `WriteList`. `ReadBatch` returns an array of exactly the count's length. Apart from what the delegate allocates for the rows, that array and one `ListOp<T>` for each operation are all it allocates. It throws `InvalidOperationException` when a row leaves the nesting depth different from what it was before that row.
+
 ## Nesting depth
 
 A record or union type can contain itself, through a list, a nullable value or a union case, such as `record Node(string Name, IReadOnlyList<Node> Children)`. For such a type, the input decides how deep a value nests, so the format limits it.
 
-A value's nesting depth is the number of record and union values that enclose it, counting itself if it is one. Records and unions count because they are the only kinds of value that can contain a value of their own type. Every record and union value counts, including a value of a record type that never contains itself. Lists, nullable values, enums, strings and primitive values do not add depth.
+A value's nesting depth is the number of record and union values that enclose it, counting itself if it is one. Records and unions count because they are the only kinds of value that can contain a value of their own type. Every record and union value counts, including a value of a record type that never contains itself. Lists, nullable values, enums, strings and primitive values do not add depth, and nor do a keyed list's batches and their operations.
 
 A union value and the case it holds are one level, not two. In a contract a union's cases are records; the union value counts once, the record of its case is not counted again, and the case's fields are at the union's depth. A case is never a value on its own, as [Unions](#unions) says, so a case record is always counted as part of its union.
 
@@ -382,12 +441,12 @@ union Shape = Circle(Point Center, double Radius) | Group(IReadOnlyList<Shape> S
 
 The limit exists for two reasons. Without it, a reader of a deeply nested value runs out of stack. On most platforms that ends the app with no error to catch, and the depth at which it happens differs with each platform's stack size. With the limit, every platform fails on the same values, with a message. The limit also bounds what a reader allocates, as [Lists](#lists) describes.
 
-In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a union calls `EnterNested` on the writer or the reader before anything of the value, so before a record's first field or a union's case index, and `ExitNested` after its last field. A record with no fields calls them too, and so does a record type that never contains itself. A union's codec calls `EnterNested` once, writes or reads the case index and that case's fields, then calls `ExitNested`; it does not call them again for the case, including a case with no fields. Nothing else counts depth: `WriteList`, `ReadList` and the presence methods do not.
+In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a union calls `EnterNested` on the writer or the reader before anything of the value, so before a record's first field or a union's case index, and `ExitNested` after its last field. A record with no fields calls them too, and so does a record type that never contains itself. A union's codec calls `EnterNested` once, writes or reads the case index and that case's fields, then calls `ExitNested`; it does not call them again for the case, including a case with no fields. Nothing else counts depth: `WriteList`, `ReadList`, `WriteBatch`, `ReadBatch` and the presence methods do not.
 
 - `OahuWriter.EnterNested` throws `InvalidOperationException` for a value at depth 65, before anything of the value is written. Reset the writer before writing another message.
 - `OahuReader.EnterNested` throws `OahuFormatException` for a value at depth 65. Its offset is where that value starts, and the reader stays where it was.
-- `ExitNested` throws `InvalidOperationException` on both when no value is entered. `OahuReader.EnsureEnd` throws it when a value is still entered. `WriteList` and `ReadList` throw it when an item leaves the depth different from what it was before that item. Each is a fault in a codec, not in the input.
-- These checks cover list items and the end of a message, and nothing else. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
+- `ExitNested` throws `InvalidOperationException` on both when no value is entered. `OahuReader.EnsureEnd` throws it when a value is still entered. `WriteList` and `ReadList` throw it when an item leaves the depth different from what it was before that item, and `WriteBatch` and `ReadBatch` when a row does. Each is a fault in a codec, not in the input.
+- These checks cover list items, the rows of a batch and the end of a message, and nothing else. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
 - `OahuWriter.Reset` returns the writer's depth to zero.
 
 ## Malformed input
@@ -413,10 +472,17 @@ A reader rejects input that is not in the format. It never guesses at a value or
 - An item of a list, a present value, a field of a record or a field of a union's case is malformed in any of the ways a value of its type is.
 - An enum's or a union's index is malformed in any of the ways a variable-length integer is, above.
 - An enum's or a union's index is not below the number of the type's values or cases.
+- A batch's count is malformed in any of the ways a count is, above.
+- A batch's count is 0.
+- A batch's count is larger than the number of bytes left after it. A count larger than 2,147,483,647 is rejected as a count that is too large instead, whatever follows.
+- An operation's tag is malformed in any of the ways a variable-length integer is, above.
+- An operation's tag is larger than 4.
+- An operation's index is malformed in any of the ways a count is, above.
+- The row of an insert or a replace is malformed in any of the ways a value of its type is.
 - A record or union value is at nesting depth 65.
 - Bytes are left over after the message's value.
 
-In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length, and for a list, its count. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. The exception is `ReadList` when an item is malformed: the items before it have been read. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
+In C#, `OahuReader` throws `OahuFormatException` for each of these. Its message says what was wrong and at which byte offset, counted from 0 at the start of the input; its `Offset` property holds the same offset. For a malformed value, the offset is where that value starts; for a string, that is its length, for a list, its count, and for a batch, its count. For an operation's tag that is too large, it is where the tag starts. When a string's bytes are not well-formed, the message also names the offset of the first sequence that is wrong. For bytes left over, it is the first byte not read. A single read call that throws leaves the reader where it was. The exceptions are `ReadList` when an item is malformed, and `ReadBatch` when an operation is: the items or operations before it have been read. When `ReadBatch` rejects a tag, the reader is at the start of that tag. A value made of several parts is read with several calls, so a failure can come after earlier parts have been read; a reader that has thrown is not used again, and the message is rejected as a whole.
 
 ## Test vectors
 

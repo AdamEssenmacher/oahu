@@ -134,7 +134,7 @@ internal sealed partial class VectorFile
         {
             var entry = Object(node, "a type");
             var name = Identifier(String(entry, "name", "a type"), "type name");
-            if (VectorTypeParser.IsPrimitiveName(name) || name == "list" || types.ContainsKey(name))
+            if (VectorTypeParser.IsPrimitiveName(name) || name is "list" or "batch" || types.ContainsKey(name))
                 throw new InvalidDataException($"The type name {name} is declared twice or is reserved.");
 
             var shapes = new[] { "record", "enum", "union" }.Where(entry.ContainsKey).ToList();

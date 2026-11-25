@@ -28,7 +28,7 @@ public sealed class OahuWriter
     private byte[] _buffer;
     private int _count;
 
-    // Counts calls to Reset, so that WriteList can tell that an item writer reset the writer.
+    // Counts calls to Reset, so that WriteList and WriteBatch can tell that an item or row writer reset the writer.
     private int _resets;
 
     // The number of record and union values entered and not yet exited.
@@ -59,8 +59,8 @@ public sealed class OahuWriter
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
     /// The nesting depth returns to zero. The buffer is kept and never shrinks, so it keeps the size that the largest
-    /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/>: the list then
-    /// throws.
+    /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer
+    /// of <see cref="WriteBatch{T}"/>: the list or batch then throws.
     /// </remarks>
     public void Reset()
     {
@@ -371,6 +371,135 @@ public sealed class OahuWriter
                 $"The list's {count} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
                 "Every item must write at least one byte.");
         }
+    }
+
+    /// <summary>
+    /// Writes a keyed list's batch: the number of operations, written as a count, followed by each operation in order,
+    /// its tag and then its payload. A row is written by <paramref name="writeRow"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tag is written as a variable-length integer, as an enum's index is: 0 for
+    /// <see cref="ListOp{T}.Insert"/>, 1 for <see cref="ListOp{T}.Remove"/>, 2 for <see cref="ListOp{T}.Move"/>, 3 for
+    /// <see cref="ListOp{T}.Replace"/> and 4 for <see cref="ListOp{T}.Clear"/>, so it is always one byte. The payload of
+    /// an insert or a replace is its index, then its row; of a remove, its index; of a move, its from index, then its to
+    /// index; of a clear, nothing. Each index is written as a count.
+    /// </para>
+    /// <para>
+    /// A batch has at least one operation. An empty list is replayed as one <see cref="ListOp{T}.Clear"/>, and a
+    /// delivered batch is never empty, so the format gives an empty batch no bytes and a reader rejects one.
+    /// </para>
+    /// <para>
+    /// <see cref="IReadOnlyCollection{T}.Count"/> is read once, before the count is written, and the batch must not
+    /// change while it is written. The method reads each operation once, just before it writes it, and checks it then:
+    /// that it is not <see langword="null"/>, that its indexes are not negative, and that the row of an insert or a
+    /// replace is not <see langword="null"/>. So a batch that fails this check at an operation after the first has
+    /// already written the operations before it. The method does not check whether an index is in range for the list
+    /// or whether keys stay unique; whoever applies the batch does.
+    /// </para>
+    /// <para>
+    /// Pass a method group of a static method or a <see langword="static"/> lambda for <paramref name="writeRow"/>, so
+    /// that the delegate is created once and cached. The method itself allocates nothing.
+    /// </para>
+    /// <para>
+    /// A batch and its operations do not add nesting depth and do not call <see cref="EnterNested"/>: a row is a record
+    /// or a union, and its codec does that itself, so a row of a batch is at depth 1. After each row, the method throws
+    /// if <paramref name="writeRow"/> reset the writer, or left the depth different from what it was before that row.
+    /// </para>
+    /// <para>
+    /// A <see langword="null"/> <paramref name="batch"/> or <paramref name="writeRow"/>, or an empty batch, throws before
+    /// anything is written. If an operation fails its check, <paramref name="writeRow"/> throws, the writer was reset,
+    /// or a row changed the depth, the exception propagates and the writer's contents are unspecified: call
+    /// <see cref="Reset"/> before writing another message.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">The type of a row.</typeparam>
+    /// <param name="batch">The operations to write, at least one.</param>
+    /// <param name="writeRow">Writes one row to the writer it is given.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="batch"/> or <paramref name="writeRow"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">An operation has a negative index.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="batch"/> is empty, an operation is <see langword="null"/>, or the row of an insert or a replace is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The message would be longer than <see cref="Array.MaxLength"/> bytes, <paramref name="writeRow"/> reset the
+    /// writer, or a row left the nesting depth different from what it was before it.
+    /// </exception>
+    public void WriteBatch<T>(IReadOnlyList<ListOp<T>> batch, Action<OahuWriter, T> writeRow)
+        where T : IOahuKeyed
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(writeRow);
+
+        var count = batch.Count;
+        if (count == 0)
+        {
+            throw new ArgumentException(
+                "A batch has at least one operation. An empty list is replayed as one Clear.", nameof(batch));
+        }
+
+        WriteCount(count);
+        var resets = _resets;
+        var depth = _depth;
+        for (var i = 0; i < count; i++)
+        {
+            // Each operation is read once and checked just before it is written, as WriteList writes each item: a
+            // failure leaves the operations before it written, and the writer must then be reset.
+            var operation = BatchOperation<T>.Of(batch[i], i);
+            CheckOperation(operation, i);
+            WriteVarUInt(operation.Tag);
+            if (operation.IndexCount > 0)
+                WriteCount(operation.First);
+            if (operation.IndexCount > 1)
+                WriteCount(operation.Second);
+            if (!operation.HasRow)
+                continue;
+
+            writeRow(this, operation.Row);
+
+            // As in WriteList: a reset also zeroes the depth, so it is checked first.
+            if (_resets != resets)
+                throw new InvalidOperationException("A row writer reset the writer while its batch was being written.");
+
+            if (_depth != depth)
+            {
+                throw new InvalidOperationException(
+                    $"A row of the batch left the nesting depth at {_depth}, not {depth} as before it. Every row " +
+                    "must call ExitNested once for each EnterNested.");
+            }
+        }
+    }
+
+    private static void CheckOperation<T>(BatchOperation<T> operation, int position)
+        where T : IOahuKeyed
+    {
+        if ((operation.IndexCount > 0 && operation.First < 0) || (operation.IndexCount > 1 && operation.Second < 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                "batch", $"The operation at position {position} of the batch has a negative index.");
+        }
+
+        if (operation.HasRow && operation.Row is null)
+            throw new ArgumentException($"The operation at position {position} of the batch has a null row.", "batch");
+    }
+
+    // The parts of one operation that the format writes. Of names each of the five cases and has no discard arm, so
+    // the compiler checks that it handles every case of the closed ListOp<T>.
+    private readonly record struct BatchOperation<T>(byte Tag, int IndexCount, int First, int Second, bool HasRow, T Row)
+        where T : IOahuKeyed
+    {
+        public static BatchOperation<T> Of(ListOp<T>? operation, int position) => operation switch
+        {
+            null => throw new ArgumentException($"The operation at position {position} of the batch is null.", "batch"),
+            ListOp<T>.Insert insert => new(OahuFormat.InsertTag, 1, insert.Index, 0, true, insert.Item),
+            ListOp<T>.Remove remove => new(OahuFormat.RemoveTag, 1, remove.Index, 0, false, default!),
+            ListOp<T>.Move move => new(OahuFormat.MoveTag, 2, move.From, move.To, false, default!),
+            ListOp<T>.Replace replace => new(OahuFormat.ReplaceTag, 1, replace.Index, 0, true, replace.Item),
+            ListOp<T>.Clear => new(OahuFormat.ClearTag, 0, 0, 0, false, default!),
+        };
     }
 
     // Seven value bits per byte; zero still takes one byte.

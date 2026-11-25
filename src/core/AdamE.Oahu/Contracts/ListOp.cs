@@ -29,7 +29,8 @@ namespace AdamE.Oahu;
 /// </para>
 /// <para>
 /// It is shaped like a contract union, but it is not a contract value: a contract never declares it as the type of a
-/// stream, a field or an argument. A keyed list carries it, and the wire format writes a batch of it in its own way.
+/// stream, a field or an argument. A keyed list carries it, and the wire format writes a batch of it in its own way,
+/// with <see cref="Wire.OahuWriter.WriteBatch{T}"/>.
 /// </para>
 /// </remarks>
 /// <typeparam name="T">The type of a row, which is an <see cref="IOahuKeyed"/>.</typeparam>

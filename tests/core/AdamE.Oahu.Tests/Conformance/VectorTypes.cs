@@ -43,6 +43,14 @@ internal sealed class ListType(VectorType item) : VectorType
     public override string Text => "list<" + Item.Text + ">";
 }
 
+/// <summary>A keyed list's batch of operations on rows of <see cref="Row"/>, a record or a union with a Key.</summary>
+internal sealed class BatchType(VectorType row) : VectorType
+{
+    public VectorType Row { get; } = row;
+
+    public override string Text => "batch<" + Row.Text + ">";
+}
+
 internal sealed record VectorField(string Name, VectorType Type);
 
 internal sealed class RecordType(string name) : VectorType
@@ -71,11 +79,13 @@ internal sealed class UnionType(string name) : VectorType
 /// <summary>Parses the type expressions of the vector file.</summary>
 /// <remarks>
 /// <code>
+/// whole  = type | "batch&lt;" declared "&gt;"
 /// type   = single [ "?" ]
 /// single = "list&lt;" type "&gt;" | primitive | declared
 /// </code>
-/// No whitespace is allowed. <c>varuint</c>, <c>count</c> and <c>unit</c> are allowed only as a vector's whole type,
-/// and never nullable. Once every
+/// A vector's type is a <c>whole</c>; a field's type is a <c>type</c>. No whitespace is allowed. <c>varuint</c>, <c>count</c>, <c>unit</c> and <c>batch&lt;Row&gt;</c> are allowed only as
+/// a vector's whole type, and never nullable. A batch's row type is a declared record or union, not nullable, whose
+/// record, or every case, has a field named <c>Key</c> of type <c>string</c>. Once every
 /// declared type has its fields, <see cref="CheckRecordCycles"/> rejects a record that contains itself through record
 /// fields alone, which has no value that ends, and then <see cref="CheckListItems"/> rejects a list whose item type is
 /// a record that is no bytes, which the format gives no bytes.
@@ -125,6 +135,21 @@ internal static class VectorTypeParser
             throw Invalid(text, $"a type name is missing at position {start}");
 
         VectorType type;
+        if (name == "batch")
+        {
+            if (!wholeType)
+                throw Invalid(text, "batch is allowed only as a vector's whole type");
+
+            Expect(text, ref position, '<');
+            var row = ParseType(text, ref position, declared, wholeType: false);
+            Expect(text, ref position, '>');
+            CheckRow(text, row);
+            if (position < text.Length && text[position] == '?')
+                throw Invalid(text, "batch cannot be nullable");
+
+            return new BatchType(row);
+        }
+
         if (name == "list")
         {
             Expect(text, ref position, '<');
@@ -154,6 +179,26 @@ internal static class VectorTypeParser
         }
 
         return type;
+    }
+
+    // A row is a record or a union that implements IOahuKeyed through a positional string Key: on the record, or on
+    // every case of the union.
+    private static void CheckRow(string text, VectorType row)
+    {
+        static bool HasKey(IEnumerable<VectorField> fields) =>
+            fields.Any(field => field.Name == "Key" && field.Type is PrimitiveType { Kind: Primitive.String });
+
+        var valid = row switch
+        {
+            RecordType record => HasKey(record.Fields),
+            UnionType union => union.Cases.All(@case => HasKey(@case.Fields)),
+            _ => false,
+        };
+        if (!valid)
+        {
+            throw Invalid(text, $"the row type {row.Text} is not a record or a union whose record or every case has " +
+                "a string field named Key");
+        }
     }
 
     public static void CheckListItems(VectorType type) => CheckListItems(type, []);

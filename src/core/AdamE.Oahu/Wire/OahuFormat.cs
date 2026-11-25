@@ -25,4 +25,11 @@ public static class OahuFormat
     /// </para>
     /// </remarks>
     public const int MaxNestingDepth = 64;
+
+    // The tags of a keyed list's operations in a batch, each written as a variable-length integer.
+    internal const byte InsertTag = 0;
+    internal const byte RemoveTag = 1;
+    internal const byte MoveTag = 2;
+    internal const byte ReplaceTag = 3;
+    internal const byte ClearTag = 4;
 }
