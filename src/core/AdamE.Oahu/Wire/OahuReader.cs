@@ -118,6 +118,48 @@ public ref struct OahuReader
         return (int)value;
     }
 
+    /// <summary>
+    /// Reads the index of an enum's value or a union's case, written as an unsigned variable-length integer, and
+    /// rejects an index the type does not have.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The codec of an enum reads its value as this index alone. The codec of a union calls
+    /// <see cref="EnterNested"/>, reads the index of its case with this method, reads that case's fields, then calls
+    /// <see cref="ExitNested"/>.
+    /// </para>
+    /// <para>
+    /// The index is the position of the value among the enum's declared values, or of the case among the union's
+    /// cases, in declaration order, counting from 0. It is not an enum value's numeric value. The codec maps the index
+    /// back to the value or case. An index that is not below <paramref name="count"/> is rejected here, so the codec
+    /// never sees one. When the index is rejected, the reader stays where it was, at the start of the index. The call
+    /// allocates nothing.
+    /// </para>
+    /// </remarks>
+    /// <param name="count">The number of values of the enum or cases of the union. It is at least 1.</param>
+    /// <returns>The index read, from 0 to <paramref name="count"/> - 1.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is less than 1.</exception>
+    /// <exception cref="OahuFormatException">
+    /// The integer is malformed, as for <see cref="ReadVarUInt"/>, or the index is not below <paramref name="count"/>.
+    /// </exception>
+    public int ReadIndex(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
+
+        var start = _offset;
+        var value = ReadVarUInt();
+        if (value >= (ulong)count)
+        {
+            _offset = start;
+            throw new OahuFormatException(
+                $"The index {value} at byte offset {start} is not below {count}, the number of values or cases of " +
+                "its type.",
+                start);
+        }
+
+        return (int)value;
+    }
+
     /// <summary>Reads a bool: one byte, 0 for <see langword="false"/> or 1 for <see langword="true"/>.</summary>
     /// <returns>The value read.</returns>
     /// <exception cref="OahuFormatException">The input has ended, or the byte is neither 0 nor 1.</exception>
