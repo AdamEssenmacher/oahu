@@ -11,7 +11,8 @@ namespace AdamE.Oahu.Tests.Conformance;
 /// <remarks>
 /// It calls the writer and reader as generated codecs do. A record calls <c>EnterNested</c>, writes or reads its fields
 /// and calls <c>ExitNested</c>; a union calls <c>EnterNested</c> once, then the index method, then the case's fields,
-/// then <c>ExitNested</c>; an enum calls only the index method. Lists and nullable values add no depth.
+/// then <c>ExitNested</c>; an enum calls only the index method. Lists and nullable values add no depth. The no-value
+/// type writes and reads nothing and calls nothing.
 /// </remarks>
 internal static class VectorCodec
 {
@@ -103,6 +104,10 @@ internal static class VectorCodec
             case Primitive.String:
                 writer.WriteString(VectorValues.ToText(value));
                 break;
+            case Primitive.Unit:
+                // The no-value type is no bytes: there is nothing to write.
+                VectorValues.ToUnit(value);
+                break;
             default:
                 throw new InvalidOperationException($"Unknown primitive {kind}.");
         }
@@ -147,7 +152,7 @@ internal static class VectorCodec
         return value;
     }
 
-    private static JsonNode ReadPrimitive(ref OahuReader reader, Primitive kind)
+    private static JsonNode? ReadPrimitive(ref OahuReader reader, Primitive kind)
     {
         switch (kind)
         {
@@ -173,6 +178,9 @@ internal static class VectorCodec
                 return JsonValue.Create(VectorValues.DoubleBits(reader.ReadDouble()));
             case Primitive.String:
                 return VectorValues.TextNode(reader.ReadString());
+            case Primitive.Unit:
+                // The no-value type is no bytes: there is nothing to read. Decode then checks that the input has ended.
+                return null;
             default:
                 throw new InvalidOperationException($"Unknown primitive {kind}.");
         }

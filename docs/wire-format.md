@@ -2,7 +2,7 @@
 
 Oahu's C# and native code exchange values as bytes in the format this page specifies. Every implementation of the format must read and write exactly these bytes. In C#, `OahuWriter` writes the format and `OahuReader` reads it, both in the `AdamE.Oahu.Wire` namespace.
 
-This page covers the whole format except the batches of a keyed list, which a later milestone adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, enums, unions and the nesting depth of records and unions.
+This page covers the whole format except the batches of a keyed list, which a later milestone adds: messages, variable-length integers, counts, booleans, signed integers, doubles, strings, instants and durations, nullable values, lists, records, the no-value type, enums, unions and the nesting depth of records and unions.
 
 ## Messages
 
@@ -10,7 +10,7 @@ A message is the bytes of one value and nothing else. It has no header, tag, len
 
 A contract is a C# interface marked `[OahuContract]` that declares what a screen observes and calls, and with it the types of the values that cross; [Contracts](contracts.md) describes it. A codec is the code, generated from the contract, that writes and reads the values of one type: in C# it calls `OahuWriter` and `OahuReader`, and each native language has its own.
 
-A reader reads the value from the first byte. When the value is read, the message must have ended. Bytes left over make the message malformed.
+A reader reads the value from the first byte. When the value is read, the message must have ended. Bytes left over make the message malformed. A message can be empty, when its value is no bytes, as the value of the [no-value type](#the-no-value-type) is.
 
 ## Variable-length integers
 
@@ -204,7 +204,7 @@ A list is the number of its items as a count, then each item in order. Each item
 | One double, 1.5 | `01 00 00 00 00 00 00 f8 3f` |
 | 128 booleans | `80 01`, then 128 bytes of `00` or `01` |
 
-Every item of a list takes at least one byte. The [contract rules](contracts.md#rules-for-values) forbid an item type whose values are no bytes, which is a record that is no bytes as [Records](#records) defines it. So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
+Every item of a list takes at least one byte. The [contract rules](contracts.md#rules-for-values) forbid an item type whose values are no bytes: a record that is no bytes, as [Records](#records) defines it, and the [no-value type](#the-no-value-type). So a list's count is never larger than the number of bytes left after it, and a reader rejects a count that is. A reader must check this before it makes room for the items. It reads the count as a count first, and only then compares it with the bytes that remain, as [Counts](#counts) says. So a count above 2,147,483,647 is rejected as a count that is too large, whatever follows. The check guarantees that one list's array of items has no more items than there are bytes left after its count, so a message of a few bytes cannot make a reader allocate a list of two billion items. It does not by itself bound the total a reader allocates, because lists nest inside each other and inside records. The [nesting depth](#nesting-depth) bounds that total. Let L be the largest number of lists that can enclose a value with no record or union between them; the type fixes it, such as 1 for a record with a list of itself and 2 for a list of lists. A byte of the input lies inside at most 64 records and unions, so it lies inside at most 65 × L lists: up to L outside the outermost record, and up to L inside each of the 64. The items of one list start at different bytes, so a byte is the first byte of at most one item of each list around it. So a reader creates at most 65 × L list items for each byte of input, whatever the input. What each list item allocates is fixed by its type, so the total a reader allocates is linear in the size of the input.
 
 Lists nest. An item can be any value: a list, a nullable value, a string and so on. An inner list is its own count and items, and an absent item is its presence byte alone.
 
@@ -247,9 +247,23 @@ record Pair(Empty First, Empty Second);
 
 A field that is a record is that record's fields, in its place.
 
-A record is no bytes when all its fields are no bytes: a record with no fields, such as `Empty`, or one whose fields are all records that are no bytes, such as `Pair`. Every other value is at least one byte: a boolean, a number, an instant, a duration, a string, an enum, a list, a union and a nullable value each are, and so is a record with at least one field that is. A cycle made only of record fields has no value that ends: a record that holds its own type as a field, or holds it through other records' fields, as in `record A(B Next)` with `record B(A Next)`, with no list, nullable value or union on the way. No value of such a type can be built, and the contract rules forbid the cycle, so this rule never has to decide one. An implementation that works out whether a record is no bytes can rely on that.
+A record is no bytes when all its fields are no bytes: a record with no fields, such as `Empty`, or one whose fields are all records that are no bytes, such as `Pair`. Apart from the value of the [no-value type](#the-no-value-type), which is never part of another value, every other value is at least one byte: a boolean, a number, an instant, a duration, a string, an enum, a list, a union and a nullable value each are, and so is a record with at least one field that is. A cycle made only of record fields has no value that ends: a record that holds its own type as a field, or holds it through other records' fields, as in `record A(B Next)` with `record B(A Next)`, with no list, nullable value or union on the way. No value of such a type can be built, and the contract rules forbid the cycle, so this rule never has to decide one. An implementation that works out whether a record is no bytes can rely on that.
 
-So any type can be the item type of a list except a record that is no bytes, and every list item is at least one byte, as [Lists](#lists) requires. A record that is no bytes can be a field, as in `Tagged`. A nullable value of it is one byte, its presence byte, so it can be a list item, as in the list of `Pair?`.
+So any type can be the item type of a list except a record that is no bytes and the no-value type, and every list item is at least one byte, as [Lists](#lists) requires. A record that is no bytes can be a field, as in `Tagged`. A nullable value of it is one byte, its presence byte, so it can be a list item, as in the list of `Pair?`.
+
+## The no-value type
+
+The no-value type has exactly one value, which carries nothing. A contract uses it for events that have nothing to say but that they happened, such as a stream of moments when a document was saved. In C# it is `OahuUnit`, in the `AdamE.Oahu` namespace, and its value is `OahuUnit.Value`.
+
+Its value is no bytes. So an events message of the no-value type is an empty message, and each empty message is one occurrence. A reader of it reads nothing. The message must then have ended, as for any message: a byte left over makes it malformed.
+
+| Value | Bytes |
+| --- | --- |
+| The value | No bytes |
+
+The [contract rules](contracts.md#rules-for-values) allow the no-value type only as the whole type of an events stream. It is never the type of a state, a list's items, a nullable value, a record's field, a union case's field or a method's argument, so the format defines no encoding for it in any of those places. As a list's item type it would break the rule of [Lists](#lists) that every item is at least one byte. As a nullable value it would be its presence byte alone, but the contract rules forbid that too. A record with no fields, which [Records](#records) describes, is no bytes too, but it is a record: the contract rules allow it wherever a record is allowed, except as a list's item type.
+
+The no-value type is neither a record nor a union, so it adds no nesting depth. Its codec writes nothing and reads nothing, so `OahuWriter` and `OahuReader` have no method for it.
 
 ## Enums
 

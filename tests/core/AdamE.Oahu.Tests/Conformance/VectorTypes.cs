@@ -19,6 +19,7 @@ internal enum Primitive
     Duration,
     VarUInt,
     Count,
+    Unit,
 }
 
 internal sealed class PrimitiveType(Primitive kind, string text) : VectorType
@@ -73,7 +74,8 @@ internal sealed class UnionType(string name) : VectorType
 /// type   = single [ "?" ]
 /// single = "list&lt;" type "&gt;" | primitive | declared
 /// </code>
-/// No whitespace is allowed. <c>varuint</c> and <c>count</c> are allowed only as a vector's whole type. Once every
+/// No whitespace is allowed. <c>varuint</c>, <c>count</c> and <c>unit</c> are allowed only as a vector's whole type,
+/// and never nullable. Once every
 /// declared type has its fields, <see cref="CheckRecordCycles"/> rejects a record that contains itself through record
 /// fields alone, which has no value that ends, and then <see cref="CheckListItems"/> rejects a list whose item type is
 /// a record that is no bytes, which the format gives no bytes.
@@ -91,7 +93,13 @@ internal static class VectorTypeParser
         ["duration"] = Primitive.Duration,
         ["varuint"] = Primitive.VarUInt,
         ["count"] = Primitive.Count,
+        ["unit"] = Primitive.Unit,
     };
+
+    // The primitives that are allowed only as a vector's whole type, never inside another type and never nullable:
+    // the building blocks of the format, and the no-value type, which a contract uses only as an events stream's type.
+    private static bool IsWholeTypeOnly(Primitive primitive) =>
+        primitive is Primitive.VarUInt or Primitive.Count or Primitive.Unit;
 
     public static bool IsPrimitiveName(string name) => Primitives.ContainsKey(name);
 
@@ -126,7 +134,7 @@ internal static class VectorTypeParser
         }
         else if (Primitives.TryGetValue(name, out var primitive))
         {
-            if (primitive is Primitive.VarUInt or Primitive.Count && !wholeType)
+            if (IsWholeTypeOnly(primitive) && !wholeType)
                 throw Invalid(text, $"{name} is allowed only as a vector's whole type");
 
             type = new PrimitiveType(primitive, name);
@@ -138,7 +146,7 @@ internal static class VectorTypeParser
 
         if (position < text.Length && text[position] == '?')
         {
-            if (wholeType && type is PrimitiveType { Kind: Primitive.VarUInt or Primitive.Count })
+            if (type is PrimitiveType primitiveType && IsWholeTypeOnly(primitiveType.Kind))
                 throw Invalid(text, $"{name} cannot be nullable");
 
             position++;

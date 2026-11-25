@@ -39,6 +39,14 @@ internal static partial class VectorValues
             ? number
             : throw Invalid("a long, an instant or a duration is a decimal string of a 64-bit signed integer", value);
 
+    // The no-value type has one value, written as JSON null. Its type is never nullable, so null is not also an absent
+    // value there.
+    public static void ToUnit(JsonNode? value)
+    {
+        if (value is not null)
+            throw Invalid("the no-value type's one value is null", value);
+    }
+
     public static ulong ToVarUInt(JsonNode? value) =>
         TextOf(value) is { } text && UnsignedPattern().IsMatch(text) &&
         ulong.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
@@ -181,10 +189,17 @@ internal static partial class VectorValues
                 VectorFileLayout.Quote(ToLong(value).ToString(CultureInfo.InvariantCulture)),
             Primitive.VarUInt => VectorFileLayout.Quote(ToVarUInt(value).ToString(CultureInfo.InvariantCulture)),
             Primitive.Double => VectorFileLayout.Quote(DoubleBits(ToDouble(value))),
+            Primitive.Unit => UnitText(value),
             Primitive.String => VectorFileLayout.Inline(TextNode(ToText(value))),
             _ => throw new InvalidOperationException($"Unknown primitive {kind}."),
         };
         builder.Append(text);
+    }
+
+    private static string UnitText(JsonNode? value)
+    {
+        ToUnit(value);
+        return "null";
     }
 
     private static string? TextOf(JsonNode? value) =>

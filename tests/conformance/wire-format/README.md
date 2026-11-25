@@ -36,8 +36,9 @@ There is no whitespace. `T?` is a nullable `T`; `T` is never itself nullable, so
 | `instant`, `duration` | Instants and durations |
 | `varuint` | Variable-length integers: an unsigned 64-bit integer |
 | `count` | Counts |
+| `unit` | The no-value type |
 
-`varuint` and `count` are building blocks of the format, not value types of a contract, so they appear only as a vector's whole type, never inside another type.
+`varuint` and `count` are building blocks of the format, not value types of a contract, so they appear only as a vector's whole type, never inside another type. `unit` appears only as a vector's whole type too, because the contract rules allow the no-value type only as the whole type of an events stream. None of the three is ever nullable: `unit?` is not a type.
 
 Each entry of `types` has a `name` and exactly one of these:
 
@@ -60,13 +61,14 @@ A value is written in JSON by its type:
 | `varuint` | A decimal string, such as `"18446744073709551615"` |
 | `double` | Its IEEE 754 bit pattern as a string of 16 lowercase hex digits, most significant first, such as `"3ff8000000000000"` for 1.5 |
 | `string` | A JSON string when the string is well-formed UTF-16. Otherwise, an array of its UTF-16 code units as integers, such as `[97, 55296]` for `a` and a lone U+D800. |
+| `unit` | `null`, the type's one value |
 | `T?` | `null` when absent; otherwise the value of `T` |
 | `list<T>` | An array of the items |
 | A record | An object with each field's value under its name, in the record's order, such as `{"X": 1, "Y": -1}`. A record with no fields is `{}`. |
 | An enum | The value's name, such as `"Normal"` |
 | A union | An object with one key, the case's name, whose value is the case's fields as for a record, such as `{"Failed": {"Message": "x"}}` or `{"Loading": {}}` |
 
-Large integers are strings and doubles are bit patterns so that every JSON parser reads them exactly. A string is an array of code units only when it holds a lone surrogate, which a JSON string cannot carry safely.
+Large integers are strings and doubles are bit patterns so that every JSON parser reads them exactly. The no-value type's value is `null`, JSON's own value that carries nothing; it cannot be mistaken for an absent value, because `unit` is never nullable, and `{}` would look like a record with no fields, which is a different type. A string is an array of code units only when it holds a lone surrogate, which a JSON string cannot carry safely.
 
 Two values are equal when they have the same type and the same value: doubles by their bits, so a NaN equals a NaN with the same bits and 0 does not equal -0; strings by their code units; instants by their milliseconds.
 
