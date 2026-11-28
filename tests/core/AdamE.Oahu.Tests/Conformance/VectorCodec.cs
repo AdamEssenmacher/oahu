@@ -20,8 +20,8 @@ internal static class VectorCodec
     public static byte[] Encode(VectorType type, JsonNode? value)
     {
         var writer = new OahuWriter();
-        Write(writer, type, value);
-        return writer.GetCompletedSpan().ToArray();
+        return writer.WriteMessage((Type: type, Value: value),
+            static (w, message) => Write(w, message.Type, message.Value)).ToArray();
     }
 
     public static JsonNode? Decode(VectorType type, byte[] bytes)

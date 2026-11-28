@@ -5,6 +5,73 @@ namespace AdamE.Oahu.Tests.Wire;
 
 public sealed class OahuWriterTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_failed_message_cannot_be_completed_even_when_the_codec_balances_nesting(bool failInWriter)
+    {
+        var writer = new OahuWriter();
+
+        var failure = Record.Exception(() =>
+        {
+            _ = writer.WriteMessage(failInWriter, static (w, failInWriter) =>
+            {
+                w.EnterNested();
+                try
+                {
+                    w.WriteInt(42);
+                    if (failInWriter)
+                        w.WriteString(null!);
+                    else
+                        throw new FormatException("The codec rejected the second field.");
+                }
+                finally
+                {
+                    w.ExitNested();
+                }
+            });
+        });
+
+        Assert.IsType(failInWriter ? typeof(ArgumentNullException) : typeof(FormatException), failure);
+        Assert.Equal(new byte[] { 0x54 }, writer.WrittenSpan.ToArray());
+        Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        Assert.Equal(new byte[] { 0x06 }, writer.WriteMessage(3, static (w, value) => w.WriteInt(value)).ToArray());
+    }
+
+    [Fact]
+    public void Completed_bytes_are_unavailable_inside_a_message_codec()
+    {
+        var writer = new OahuWriter();
+
+        var bytes = writer.WriteMessage(42, static (w, value) =>
+        {
+            w.WriteInt(value);
+            Assert.Throws<InvalidOperationException>(() => { _ = w.GetCompletedSpan(); });
+        });
+
+        Assert.Equal(new byte[] { 0x54 }, bytes.ToArray());
+    }
+
+    [Fact]
+    public void Reset_inside_a_message_codec_invalidates_the_message()
+    {
+        var writer = new OahuWriter();
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = writer.WriteMessage(42, static (w, value) =>
+            {
+                w.WriteInt(value);
+                w.Reset();
+                w.WriteInt(value);
+            });
+        });
+
+        Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        writer.Reset();
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
     [Fact]
     public void A_new_writer_is_empty()
     {

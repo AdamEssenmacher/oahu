@@ -10,10 +10,9 @@ namespace AdamE.Oahu.Wire;
 /// Writes values in Oahu's wire format to a growable byte buffer that the writer owns.
 /// </summary>
 /// <remarks>
-/// A writer holds bytes and the nesting depth of the value being written, and nothing else. It is not thread-safe. The
-/// codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's parts.
-/// Get a finished message's bytes with <see cref="GetCompletedSpan"/>, which checks that every value entered has
-/// been exited. Call <see cref="Reset"/> to reuse the writer for another message.
+/// A writer is not thread-safe. The codec of a record or a union calls <see cref="EnterNested"/> and
+/// <see cref="ExitNested"/> around the value's parts. Use <see cref="WriteMessage{T}"/> to encode a whole message
+/// and obtain its bytes only when the codec succeeds.
 /// </remarks>
 public sealed class OahuWriter
 {
@@ -39,8 +38,9 @@ public sealed class OahuWriter
     // it is above zero only inside an item or row writer, and Reset leaves it as it is.
     private int _sequences;
 
-    // Set when a WriteList or WriteBatch call threw, or when Reset was called from inside one. Only a Reset outside
-    // every list and batch clears it, so GetCompletedSpan keeps refusing until the caller resets the writer.
+    private bool _writingMessage;
+
+    // A failed message, list or batch cannot be completed. Reset outside a codec clears the fault.
     private bool _faulted;
 
     /// <summary>Creates a writer with a default initial capacity.</summary>
@@ -61,7 +61,7 @@ public sealed class OahuWriter
     /// <summary>The bytes written since the writer was created or last reset.</summary>
     /// <remarks>
     /// The span is valid until the next write or <see cref="Reset"/>. Use <see cref="GetCompletedSpan"/> to get the
-    /// bytes for sending a message.
+    /// bytes after a successful manual encode, or use <see cref="WriteMessage{T}"/> to run the whole codec.
     /// </remarks>
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _count);
 
@@ -69,25 +69,29 @@ public sealed class OahuWriter
     public int WrittenCount => _count;
 
     /// <summary>
-    /// Returns the written bytes after checking that every value entered has been exited and that no list or batch is
-    /// still being written.
+    /// Returns the written bytes after checking that every value entered has been exited and no message codec,
+    /// list or batch is still running.
     /// </summary>
     /// <remarks>
     /// Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer of <see cref="WriteBatch{T}"/>:
-    /// the message is not finished there, so it throws. It also throws after a list or batch threw, until
-    /// <see cref="Reset"/>.
+    /// the message is not finished there, so it throws. It also throws after a message, list or batch failed,
+    /// until <see cref="Reset"/>. When writing manually, call it only after every part of the encode succeeded.
     /// </remarks>
     /// <returns>The span of written bytes, valid until the next write or <see cref="Reset"/>.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, or a
-    /// <see cref="WriteList{T}"/> or <see cref="WriteBatch{T}"/> call has not returned.
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, a
+    /// message codec, list or batch is still running, or an encode run by
+    /// <see cref="WriteMessage{T}"/>, <see cref="WriteList{T}"/> or <see cref="WriteBatch{T}"/> failed.
     /// </exception>
     public ReadOnlySpan<byte> GetCompletedSpan()
     {
+        if (_writingMessage)
+            throw new InvalidOperationException("The message codec is still running.");
+
         if (_sequences != 0 || _faulted)
         {
             throw new InvalidOperationException(
-                "A list or batch is still being written, or one threw and the writer was not reset since.");
+                "A list or batch is still being written, or a message, list or batch failed before the writer was reset.");
         }
 
         if (_depth != 0)
@@ -99,12 +103,56 @@ public sealed class OahuWriter
         return WrittenSpan;
     }
 
+    /// <summary>Starts a new message, runs its codec and returns the completed bytes.</summary>
+    /// <remarks>
+    /// The writer is reset before encoding. If the codec or the completion check throws, the exception propagates
+    /// and <see cref="GetCompletedSpan"/> refuses the partial bytes until the writer is reset. A subsequent call to
+    /// this method resets the writer and can encode another message. The codec must not reset the writer or start
+    /// another message.
+    /// </remarks>
+    /// <param name="value">The value to encode.</param>
+    /// <param name="write">The codec that writes the entire message.</param>
+    /// <returns>The span of completed bytes, valid until the next write or <see cref="Reset"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="write"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The writer is already in a message codec, list or batch, the codec reset the writer, or the message failed
+    /// the completion checks.
+    /// </exception>
+    public ReadOnlySpan<byte> WriteMessage<T>(T value, Action<OahuWriter, T> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        if (_writingMessage || _sequences != 0)
+            throw new InvalidOperationException("Cannot start a message while a message codec, list or batch is active.");
+
+        Reset();
+        var resets = _resets;
+        _writingMessage = true;
+        try
+        {
+            write(this, value);
+            if (_resets != resets)
+                throw new InvalidOperationException("The message codec reset the writer.");
+
+            _writingMessage = false;
+            return GetCompletedSpan();
+        }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+        finally
+        {
+            _writingMessage = false;
+        }
+    }
+
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
     /// The nesting depth returns to zero. The buffer is kept and never shrinks, so it keeps the size that the largest
-    /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer
-    /// of <see cref="WriteBatch{T}"/>: the list or batch then throws, and <see cref="GetCompletedSpan"/> throws until
-    /// the writer is reset again outside every list and batch.
+    /// message written so far needed. Calling it from a message codec, list item writer or batch row writer
+    /// invalidates the encode. <see cref="GetCompletedSpan"/> then throws until the writer is reset outside the codec,
+    /// list or batch.
     /// </remarks>
     public void Reset()
     {
