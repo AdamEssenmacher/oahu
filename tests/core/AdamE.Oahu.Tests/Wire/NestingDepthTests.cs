@@ -352,7 +352,7 @@ public sealed class NestingDepthTests
         });
 
         Assert.Equal(SequenceInProgressMessage, exception?.Message);
-        Assert.False(writer.GetCompletedSpan().IsEmpty);
+        Assert.Equal("01" + "00" + "00" + "0161" + "00" + "00", Hex.Of(writer.GetCompletedSpan()));
     }
 
     [Fact]
