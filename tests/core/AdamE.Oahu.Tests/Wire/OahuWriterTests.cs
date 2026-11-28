@@ -5,6 +5,77 @@ namespace AdamE.Oahu.Tests.Wire;
 
 public sealed class OahuWriterTests
 {
+    public static TheoryData<string, Action<OahuWriter>> FailingWrites => new()
+    {
+        { "WriteString(null)", static w => w.WriteString(null!) },
+        { "WriteCount(-1)", static w => w.WriteCount(-1) },
+        { "WriteIndex(2, 2)", static w => w.WriteIndex(2, 2) },
+        { "ExitNested at depth 0", static w => w.ExitNested() },
+        { "WriteList(null writer)", static w => w.WriteList<int>([1], null!) },
+        { "WriteBatch(empty)", static w => w.WriteBatch<BatchTests.TaskRow>([], static (_, _) => { }) },
+        { "WriteMessage(null codec)", static w => w.WriteMessage<int>(1, null!) },
+    };
+
+    [Theory]
+    [MemberData(nameof(FailingWrites))]
+    public void A_write_that_threw_faults_a_manual_encode_until_reset(string name, Action<OahuWriter> fail)
+    {
+        _ = name;
+        var writer = new OahuWriter();
+        writer.WriteInt(42);
+
+        Assert.ThrowsAny<Exception>(() => fail(writer));
+
+        Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        writer.Reset();
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
+    public void A_manual_encode_that_balances_nesting_after_a_failed_write_cannot_be_completed()
+    {
+        var writer = new OahuWriter();
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            writer.EnterNested();
+            try
+            {
+                writer.WriteInt(1);
+                writer.WriteString(null!);
+            }
+            finally
+            {
+                writer.ExitNested();
+            }
+        });
+
+        Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+    }
+
+    [Fact]
+    public void A_nested_message_swallowed_by_its_codec_faults_the_outer_message()
+    {
+        var writer = new OahuWriter();
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = writer.WriteMessage(42, static (w, value) =>
+            {
+                w.WriteInt(value);
+                try
+                {
+                    _ = w.WriteMessage(value, static (inner, v) => inner.WriteInt(v));
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            });
+        });
+
+        Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

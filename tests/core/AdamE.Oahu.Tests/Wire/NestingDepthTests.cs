@@ -320,7 +320,7 @@ public sealed class NestingDepthTests
     }
 
     private const string SequenceInProgressMessage =
-        "A list or batch is still being written, or a message, list or batch failed before the writer was reset.";
+        "A list or batch is still being written, or a write failed before the writer was reset.";
 
     [Fact]
     public void The_writer_completion_check_rejects_a_call_from_an_item_writer_of_a_top_level_list()
