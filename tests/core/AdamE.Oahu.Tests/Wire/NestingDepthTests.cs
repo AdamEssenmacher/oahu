@@ -319,6 +319,56 @@ public sealed class NestingDepthTests
         Assert.True(writer.GetCompletedSpan().IsEmpty);
     }
 
+    private const string SequenceInProgressMessage =
+        "A list or batch is still being written, or one threw and the writer was not reset since.";
+
+    [Fact]
+    public void The_writer_completion_check_rejects_a_call_from_an_item_writer_of_a_top_level_list()
+    {
+        var writer = new OahuWriter();
+        InvalidOperationException? exception = null;
+
+        writer.WriteList(new[] { 1, 2 }.ToOahuList(), (w, item) =>
+        {
+            w.WriteInt(item);
+            if (item == 1)
+                exception = Assert.Throws<InvalidOperationException>(() => { _ = w.GetCompletedSpan(); });
+        });
+
+        Assert.Equal(SequenceInProgressMessage, exception?.Message);
+        Assert.Equal("02" + "02" + "04", Hex.Of(writer.GetCompletedSpan()));
+    }
+
+    [Fact]
+    public void The_writer_completion_check_rejects_a_call_from_a_row_writer_of_a_batch()
+    {
+        var writer = new OahuWriter();
+        InvalidOperationException? exception = null;
+
+        writer.WriteBatch<BatchTests.TaskRow>([new ListOp<BatchTests.TaskRow>.Insert(0, new("a", "", false))], (w, row) =>
+        {
+            BatchTests.TaskRow.Write(w, row);
+            exception = Assert.Throws<InvalidOperationException>(() => { _ = w.GetCompletedSpan(); });
+        });
+
+        Assert.Equal(SequenceInProgressMessage, exception?.Message);
+        Assert.False(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
+    public void The_writer_completion_check_rejects_a_list_that_threw_until_the_writer_is_reset()
+    {
+        var writer = new OahuWriter();
+        Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList(new[] { 1 }.ToOahuList(), static (_, _) => { }));
+        var exception = Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        Assert.Equal(SequenceInProgressMessage, exception.Message);
+
+        writer.Reset();
+
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
     [Fact]
     public void The_end_check_rejects_a_value_still_entered()
     {

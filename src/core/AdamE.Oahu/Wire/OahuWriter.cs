@@ -35,6 +35,9 @@ public sealed class OahuWriter
     // The number of record and union values entered and not yet exited.
     private int _depth;
 
+    // The number of WriteList and WriteBatch calls in progress. A call that throws leaves it raised until Reset.
+    private int _sequences;
+
     /// <summary>Creates a writer with a default initial capacity.</summary>
     public OahuWriter()
         : this(DefaultCapacity)
@@ -60,13 +63,28 @@ public sealed class OahuWriter
     /// <summary>The number of bytes written since the writer was created or last reset.</summary>
     public int WrittenCount => _count;
 
-    /// <summary>Returns the written bytes after checking that every value entered has been exited.</summary>
+    /// <summary>
+    /// Returns the written bytes after checking that every value entered has been exited and that no list or batch is
+    /// still being written.
+    /// </summary>
+    /// <remarks>
+    /// Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer of <see cref="WriteBatch{T}"/>:
+    /// the message is not finished there, so it throws. It also throws after a list or batch threw, until
+    /// <see cref="Reset"/>.
+    /// </remarks>
     /// <returns>The span of written bytes, valid until the next write or <see cref="Reset"/>.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>.
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, or a
+    /// <see cref="WriteList{T}"/> or <see cref="WriteBatch{T}"/> call has not returned.
     /// </exception>
     public ReadOnlySpan<byte> GetCompletedSpan()
     {
+        if (_sequences != 0)
+        {
+            throw new InvalidOperationException(
+                "A list or batch is still being written, or one threw and the writer was not reset since.");
+        }
+
         if (_depth != 0)
         {
             throw new InvalidOperationException(
@@ -86,6 +104,7 @@ public sealed class OahuWriter
     {
         _count = 0;
         _depth = 0;
+        _sequences = 0;
         _resets++;
     }
 
@@ -357,6 +376,7 @@ public sealed class OahuWriter
         ArgumentNullException.ThrowIfNull(writeItem);
 
         var span = items.AsSpan();
+        _sequences++;
         WriteCount(span.Length);
         var itemsStart = _count;
         var resets = _resets;
@@ -389,6 +409,8 @@ public sealed class OahuWriter
                 $"The list's {span.Length} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
                 "Every item must write at least one byte.");
         }
+
+        _sequences--;
     }
 
     /// <summary>
@@ -459,6 +481,7 @@ public sealed class OahuWriter
                 "A batch has at least one operation. An empty list is replayed as one Clear.", nameof(batch));
         }
 
+        _sequences++;
         WriteCount(count);
         var resets = _resets;
         var depth = _depth;
@@ -489,6 +512,8 @@ public sealed class OahuWriter
                     "must call ExitNested once for each EnterNested.");
             }
         }
+
+        _sequences--;
     }
 
     private static void CheckOperation<T>(BatchOperation<T> operation, int position)
