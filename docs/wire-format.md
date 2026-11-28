@@ -447,7 +447,7 @@ In C#, `OahuFormat.MaxNestingDepth` is the limit. The codec of a record or a uni
 - `OahuReader.EnterNested` throws `OahuFormatException` for a value at depth 65. Its offset is where that value starts, and the reader stays where it was.
 - `ExitNested` throws `InvalidOperationException` on both when no value is entered. Get the bytes for sending a message with `OahuWriter.GetCompletedSpan()`. It checks that every value entered on the writer has been exited. `OahuReader.EnsureEnd()` checks the reader's own depth. Both throw `InvalidOperationException` if a value is still entered. `OahuWriter.WrittenSpan` can be used to inspect partial bytes.
 - `WriteList` and `ReadList` throw `InvalidOperationException` when an item leaves the depth different from what it was before that item, and `WriteBatch` and `ReadBatch` when a row does. Each unbalanced depth is a fault in a codec, not in the input.
-- These checks cover list items, the rows of a batch and the end of a message, and nothing else. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
+- These checks cover list items, the rows of a batch and the end of a message, and nothing else. On the writer, the end of a message is checked only by `GetCompletedSpan`; reading `WrittenSpan` checks nothing. A codec that enters without exiting for values that are not list items, such as a record's fields, is not caught where it happens. The depth it leaves behind builds up, and the fault can then be reported as a value nested too deep.
 - `OahuWriter.Reset` returns the writer's depth to zero.
 
 ## Malformed input

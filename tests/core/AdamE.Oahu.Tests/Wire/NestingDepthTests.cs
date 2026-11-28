@@ -297,6 +297,29 @@ public sealed class NestingDepthTests
     }
 
     [Fact]
+    public void The_writer_completion_check_accepts_an_empty_writer()
+    {
+        var writer = new OahuWriter();
+
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
+    public void The_writer_completion_check_accepts_a_writer_reset_after_a_value_too_deep()
+    {
+        var writer = new OahuWriter();
+        Assert.Throws<InvalidOperationException>(() => Tree.Write(writer, Tree.Chain(65)));
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = writer.GetCompletedSpan();
+        });
+
+        writer.Reset();
+
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
     public void The_end_check_rejects_a_value_still_entered()
     {
         var reader = new OahuReader([]);

@@ -12,7 +12,8 @@ namespace AdamE.Oahu.Wire;
 /// <remarks>
 /// A writer holds bytes and the nesting depth of the value being written, and nothing else. It is not thread-safe. The
 /// codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's parts.
-/// Call <see cref="Reset"/> to reuse the writer for another message.
+/// Get a finished message's bytes with <see cref="GetCompletedSpan"/>, which checks that every value entered has
+/// been exited. Call <see cref="Reset"/> to reuse the writer for another message.
 /// </remarks>
 public sealed class OahuWriter
 {
