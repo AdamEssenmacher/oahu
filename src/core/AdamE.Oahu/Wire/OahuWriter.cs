@@ -10,10 +10,9 @@ namespace AdamE.Oahu.Wire;
 /// Writes values in Oahu's wire format to a growable byte buffer that the writer owns.
 /// </summary>
 /// <remarks>
-/// A writer holds bytes and the nesting depth of the value being written, and nothing else. It is not thread-safe. The
-/// codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's parts.
-/// Get a finished message's bytes with <see cref="GetCompletedSpan"/>, which checks that every value entered has
-/// been exited. Call <see cref="Reset"/> to reuse the writer for another message.
+/// A writer is not thread-safe. The codec of a record or a union calls <see cref="EnterNested"/> and
+/// <see cref="ExitNested"/> around the value's parts. Use <see cref="WriteMessage{T}"/> to encode a whole message
+/// and obtain its bytes only when the codec succeeds.
 /// </remarks>
 public sealed class OahuWriter
 {
@@ -39,8 +38,12 @@ public sealed class OahuWriter
     // it is above zero only inside an item or row writer, and Reset leaves it as it is.
     private int _sequences;
 
-    // Set when a WriteList or WriteBatch call threw, or when Reset was called from inside one. Only a Reset outside
-    // every list and batch clears it, so GetCompletedSpan keeps refusing until the caller resets the writer.
+    // True while WriteMessage runs its codec, so that GetCompletedSpan and a nested WriteMessage refuse.
+    private bool _writingMessage;
+
+    // Set when any write, list, batch or message threw, so that GetCompletedSpan refuses the partial message. Reset
+    // clears it, unless called from inside a list or batch. A reset inside a WriteMessage codec does clear it, and
+    // WriteMessage then detects that reset through _resets.
     private bool _faulted;
 
     /// <summary>Creates a writer with a default initial capacity.</summary>
@@ -61,7 +64,7 @@ public sealed class OahuWriter
     /// <summary>The bytes written since the writer was created or last reset.</summary>
     /// <remarks>
     /// The span is valid until the next write or <see cref="Reset"/>. Use <see cref="GetCompletedSpan"/> to get the
-    /// bytes for sending a message.
+    /// bytes after a successful manual encode, or use <see cref="WriteMessage{T}"/> to run the whole codec.
     /// </remarks>
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _count);
 
@@ -69,25 +72,28 @@ public sealed class OahuWriter
     public int WrittenCount => _count;
 
     /// <summary>
-    /// Returns the written bytes after checking that every value entered has been exited and that no list or batch is
-    /// still being written.
+    /// Returns the written bytes after checking that every value entered has been exited and no message codec,
+    /// list or batch is still running.
     /// </summary>
     /// <remarks>
     /// Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer of <see cref="WriteBatch{T}"/>:
-    /// the message is not finished there, so it throws. It also throws after a list or batch threw, until
-    /// <see cref="Reset"/>.
+    /// the message is not finished there, so it throws. It also throws after any write method, list, batch or message
+    /// threw, until <see cref="Reset"/>, even when the caller caught the exception and the nesting is balanced.
     /// </remarks>
     /// <returns>The span of written bytes, valid until the next write or <see cref="Reset"/>.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, or a
-    /// <see cref="WriteList{T}"/> or <see cref="WriteBatch{T}"/> call has not returned.
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, a
+    /// message codec, list or batch is still running, or a write method threw since the writer was last reset.
     /// </exception>
     public ReadOnlySpan<byte> GetCompletedSpan()
     {
+        if (_writingMessage)
+            throw new InvalidOperationException("The message codec is still running.");
+
         if (_sequences != 0 || _faulted)
         {
             throw new InvalidOperationException(
-                "A list or batch is still being written, or one threw and the writer was not reset since.");
+                "A list or batch is still being written, or a write failed before the writer was reset.");
         }
 
         if (_depth != 0)
@@ -99,12 +105,61 @@ public sealed class OahuWriter
         return WrittenSpan;
     }
 
+    /// <summary>Starts a new message, runs its codec and returns the completed bytes.</summary>
+    /// <remarks>
+    /// The writer is reset before encoding. If the codec or the completion check throws, the exception propagates
+    /// and <see cref="GetCompletedSpan"/> refuses the partial bytes until the writer is reset. A call that throws
+    /// before encoding, for a <see langword="null"/> codec or while a codec, list or batch is active, also faults the
+    /// writer, so <see cref="GetCompletedSpan"/> refuses whatever it held. A subsequent call to
+    /// this method resets the writer and can encode another message. The codec must not reset the writer or start
+    /// another message.
+    /// </remarks>
+    /// <param name="value">The value to encode.</param>
+    /// <param name="write">The codec that writes the entire message.</param>
+    /// <returns>The span of completed bytes, valid until the next write or <see cref="Reset"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="write"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The writer is already in a message codec, list or batch, the codec reset the writer, or the message failed
+    /// the completion checks.
+    /// </exception>
+    public ReadOnlySpan<byte> WriteMessage<T>(T value, Action<OahuWriter, T> write)
+    {
+        if (write is null || _writingMessage || _sequences != 0)
+        {
+            _faulted = true;
+            ArgumentNullException.ThrowIfNull(write);
+            throw new InvalidOperationException("Cannot start a message while a message codec, list or batch is active.");
+        }
+
+        Reset();
+        var resets = _resets;
+        _writingMessage = true;
+        try
+        {
+            write(this, value);
+            if (_resets != resets)
+                throw new InvalidOperationException("The message codec reset the writer.");
+
+            _writingMessage = false;
+            return GetCompletedSpan();
+        }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+        finally
+        {
+            _writingMessage = false;
+        }
+    }
+
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
     /// The nesting depth returns to zero. The buffer is kept and never shrinks, so it keeps the size that the largest
-    /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer
-    /// of <see cref="WriteBatch{T}"/>: the list or batch then throws, and <see cref="GetCompletedSpan"/> throws until
-    /// the writer is reset again outside every list and batch.
+    /// message written so far needed. Calling it from a message codec, list item writer or batch row writer
+    /// invalidates the encode. <see cref="GetCompletedSpan"/> then throws until the writer is reset outside the codec,
+    /// list or batch.
     /// </remarks>
     public void Reset()
     {
@@ -148,6 +203,7 @@ public sealed class OahuWriter
     {
         if (_depth >= OahuFormat.MaxNestingDepth)
         {
+            _faulted = true;
             throw new InvalidOperationException(
                 $"The value at byte offset {_count} is at nesting depth {_depth + 1}, deeper than the largest " +
                 $"nesting depth, {OahuFormat.MaxNestingDepth}.");
@@ -164,7 +220,10 @@ public sealed class OahuWriter
     public void ExitNested()
     {
         if (_depth == 0)
+        {
+            _faulted = true;
             throw new InvalidOperationException("ExitNested was called with no nested value entered.");
+        }
 
         _depth--;
     }
@@ -186,7 +245,12 @@ public sealed class OahuWriter
     /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
     public void WriteCount(int count)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (count < 0)
+        {
+            _faulted = true;
+            ArgumentOutOfRangeException.ThrowIfNegative(count);
+        }
+
         WriteVarUInt((ulong)count);
     }
 
@@ -215,9 +279,14 @@ public sealed class OahuWriter
     /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
     public void WriteIndex(int index, int count)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, count);
+        if (count < 1 || index < 0 || index >= count)
+        {
+            _faulted = true;
+            ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, count);
+        }
+
         WriteVarUInt((ulong)index);
     }
 
@@ -285,14 +354,18 @@ public sealed class OahuWriter
     /// three bytes for each replaced surrogate. A string cut in the middle of a character then shows one replacement
     /// character instead of ending the app. The string's UTF-8 bytes, with its length and the bytes written before it,
     /// must fit in <see cref="Array.MaxLength"/> bytes, which also keeps the length within the largest count; a write
-    /// that does not fit throws and leaves the writer as it was.
+    /// that does not fit throws and leaves the written bytes as they were.
     /// </remarks>
     /// <param name="value">The string to write.</param>
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The message would be longer than <see cref="Array.MaxLength"/> bytes.</exception>
     public void WriteString(string value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        if (value is null)
+        {
+            _faulted = true;
+            ArgumentNullException.ThrowIfNull(value);
+        }
 
         // Each UTF-16 char takes 1 to 3 UTF-8 bytes: a char below U+0800 takes 1 or 2, any other char outside a pair
         // takes 3, a lone surrogate included, since it becomes the three bytes of U+FFFD, and a pair's two chars take
@@ -381,7 +454,11 @@ public sealed class OahuWriter
     /// </exception>
     public void WriteList<T>(OahuList<T> items, Action<OahuWriter, T> writeItem)
     {
-        ArgumentNullException.ThrowIfNull(writeItem);
+        if (writeItem is null)
+        {
+            _faulted = true;
+            ArgumentNullException.ThrowIfNull(writeItem);
+        }
 
         var span = items.AsSpan();
         _sequences++;
@@ -499,12 +576,28 @@ public sealed class OahuWriter
     public void WriteBatch<T>(IReadOnlyList<ListOp<T>> batch, Action<OahuWriter, T> writeRow)
         where T : IOahuKeyed
     {
-        ArgumentNullException.ThrowIfNull(batch);
-        ArgumentNullException.ThrowIfNull(writeRow);
+        if (batch is null || writeRow is null)
+        {
+            _faulted = true;
+            ArgumentNullException.ThrowIfNull(batch);
+            ArgumentNullException.ThrowIfNull(writeRow);
+        }
 
-        var count = batch.Count;
+        // The caller's list can throw from Count, before the sequence below starts and faults on its own.
+        int count;
+        try
+        {
+            count = batch.Count;
+        }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+
         if (count == 0)
         {
+            _faulted = true;
             throw new ArgumentException(
                 "A batch has at least one operation. An empty list is replayed as one Clear.", nameof(batch));
         }
@@ -653,9 +746,21 @@ public sealed class OahuWriter
     private void Grow(long required)
     {
         if (required > Array.MaxLength)
+        {
+            _faulted = true;
             throw new InvalidOperationException($"The writer cannot hold more than {Array.MaxLength} bytes.");
+        }
 
         var doubled = Math.Min((long)_buffer.Length * 2, Array.MaxLength);
-        Array.Resize(ref _buffer, (int)Math.Max(doubled, required));
+        try
+        {
+            Array.Resize(ref _buffer, (int)Math.Max(doubled, required));
+        }
+        catch
+        {
+            // An OutOfMemoryException leaves the bytes as they were, but the write that needed the room did not happen.
+            _faulted = true;
+            throw;
+        }
     }
 }

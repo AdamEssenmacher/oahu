@@ -111,6 +111,7 @@ AdamE.Oahu.Wire.OahuWriter.WriteInstant(System.DateTimeOffset value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteInt(int value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteList<T>(AdamE.Oahu.OahuList<T> items, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! writeItem) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteLong(long value) -> void
+AdamE.Oahu.Wire.OahuWriter.WriteMessage<T>(T value, System.Action<AdamE.Oahu.Wire.OahuWriter!, T>! write) -> System.ReadOnlySpan<byte>
 AdamE.Oahu.Wire.OahuWriter.WritePresence(bool present) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteString(string! value) -> void
 AdamE.Oahu.Wire.OahuWriter.WriteVarUInt(ulong value) -> void
