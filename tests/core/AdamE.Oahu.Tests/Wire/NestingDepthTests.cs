@@ -276,6 +276,27 @@ public sealed class NestingDepthTests
     }
 
     [Fact]
+    public void The_writer_completion_check_rejects_a_top_level_value_still_entered()
+    {
+        var writer = new OahuWriter();
+        writer.EnterNested();
+        writer.WriteInt(42);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = writer.GetCompletedSpan();
+        });
+
+        Assert.Equal(
+            "1 nested value(s) entered with EnterNested have not been exited with ExitNested.", exception.Message);
+        Assert.Equal("54", Hex.Of(writer.WrittenSpan));
+
+        writer.ExitNested();
+
+        Assert.Equal("54", Hex.Of(writer.GetCompletedSpan()));
+    }
+
+    [Fact]
     public void The_end_check_rejects_a_value_still_entered()
     {
         var reader = new OahuReader([]);

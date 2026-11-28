@@ -50,11 +50,30 @@ public sealed class OahuWriter
     }
 
     /// <summary>The bytes written since the writer was created or last reset.</summary>
-    /// <remarks>The span is valid until the next write or <see cref="Reset"/>.</remarks>
+    /// <remarks>
+    /// The span is valid until the next write or <see cref="Reset"/>. Use <see cref="GetCompletedSpan"/> to get the
+    /// bytes for sending a message.
+    /// </remarks>
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _count);
 
     /// <summary>The number of bytes written since the writer was created or last reset.</summary>
     public int WrittenCount => _count;
+
+    /// <summary>Returns the written bytes after checking that every value entered has been exited.</summary>
+    /// <returns>The span of written bytes, valid until the next write or <see cref="Reset"/>.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>.
+    /// </exception>
+    public ReadOnlySpan<byte> GetCompletedSpan()
+    {
+        if (_depth != 0)
+        {
+            throw new InvalidOperationException(
+                $"{_depth} nested value(s) entered with EnterNested have not been exited with ExitNested.");
+        }
+
+        return WrittenSpan;
+    }
 
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
