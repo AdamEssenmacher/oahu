@@ -388,9 +388,13 @@ public sealed class OahuWriter
             // Both checks run after each item, so that an item that enters without exiting is reported here rather
             // than reaching the depth limit within the list and being reported as a too-deep value. A reset followed
             // by enough writes can leave _count above itemsStart, so the byte check alone misses it. A reset also
-            // zeroes the depth, so it is checked first.
+            // zeroes the depth, so it is checked first. The reset also zeroed _sequences, so it is raised again: the
+            // list threw, and GetCompletedSpan must keep refusing until the caller resets the writer.
             if (_resets != resets)
+            {
+                _sequences++;
                 throw new InvalidOperationException("An item writer reset the writer while its list was being written.");
+            }
 
             if (_depth != depth)
             {
@@ -501,9 +505,13 @@ public sealed class OahuWriter
 
             writeRow(this, operation.Row);
 
-            // As in WriteList: a reset also zeroes the depth, so it is checked first.
+            // As in WriteList: a reset also zeroes the depth, so it is checked first, and it zeroed _sequences, so
+            // that is raised again.
             if (_resets != resets)
+            {
+                _sequences++;
                 throw new InvalidOperationException("A row writer reset the writer while its batch was being written.");
+            }
 
             if (_depth != depth)
             {

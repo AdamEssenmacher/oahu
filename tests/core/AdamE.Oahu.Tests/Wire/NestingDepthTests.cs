@@ -370,6 +370,42 @@ public sealed class NestingDepthTests
     }
 
     [Fact]
+    public void The_writer_completion_check_rejects_a_list_whose_item_writer_reset_the_writer()
+    {
+        var writer = new OahuWriter();
+        Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteList(new[] { 1 }.ToOahuList(), static (w, item) =>
+            {
+                w.Reset();
+                w.WriteInt(item);
+            }));
+        var exception = Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        Assert.Equal(SequenceInProgressMessage, exception.Message);
+
+        writer.Reset();
+
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
+    public void The_writer_completion_check_rejects_a_batch_whose_row_writer_reset_the_writer()
+    {
+        var writer = new OahuWriter();
+        Assert.Throws<InvalidOperationException>(() =>
+            writer.WriteBatch<BatchTests.TaskRow>([new ListOp<BatchTests.TaskRow>.Insert(0, new("a", "", false))], static (w, row) =>
+            {
+                w.Reset();
+                BatchTests.TaskRow.Write(w, row);
+            }));
+        var exception = Assert.Throws<InvalidOperationException>(() => { _ = writer.GetCompletedSpan(); });
+        Assert.Equal(SequenceInProgressMessage, exception.Message);
+
+        writer.Reset();
+
+        Assert.True(writer.GetCompletedSpan().IsEmpty);
+    }
+
+    [Fact]
     public void The_end_check_rejects_a_value_still_entered()
     {
         var reader = new OahuReader([]);
