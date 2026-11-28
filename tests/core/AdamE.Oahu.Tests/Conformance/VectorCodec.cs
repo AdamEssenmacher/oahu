@@ -21,7 +21,7 @@ internal static class VectorCodec
     {
         var writer = new OahuWriter();
         Write(writer, type, value);
-        return writer.WrittenSpan.ToArray();
+        return writer.GetCompletedSpan().ToArray();
     }
 
     public static JsonNode? Decode(VectorType type, byte[] bytes)

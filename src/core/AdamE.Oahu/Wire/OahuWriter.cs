@@ -12,7 +12,8 @@ namespace AdamE.Oahu.Wire;
 /// <remarks>
 /// A writer holds bytes and the nesting depth of the value being written, and nothing else. It is not thread-safe. The
 /// codec of a record or a union calls <see cref="EnterNested"/> and <see cref="ExitNested"/> around the value's parts.
-/// Call <see cref="Reset"/> to reuse the writer for another message.
+/// Get a finished message's bytes with <see cref="GetCompletedSpan"/>, which checks that every value entered has
+/// been exited. Call <see cref="Reset"/> to reuse the writer for another message.
 /// </remarks>
 public sealed class OahuWriter
 {
@@ -34,6 +35,14 @@ public sealed class OahuWriter
     // The number of record and union values entered and not yet exited.
     private int _depth;
 
+    // The number of WriteList and WriteBatch calls in progress. Each call lowers it again when it returns or throws, so
+    // it is above zero only inside an item or row writer, and Reset leaves it as it is.
+    private int _sequences;
+
+    // Set when a WriteList or WriteBatch call threw, or when Reset was called from inside one. Only a Reset outside
+    // every list and batch clears it, so GetCompletedSpan keeps refusing until the caller resets the writer.
+    private bool _faulted;
+
     /// <summary>Creates a writer with a default initial capacity.</summary>
     public OahuWriter()
         : this(DefaultCapacity)
@@ -50,20 +59,58 @@ public sealed class OahuWriter
     }
 
     /// <summary>The bytes written since the writer was created or last reset.</summary>
-    /// <remarks>The span is valid until the next write or <see cref="Reset"/>.</remarks>
+    /// <remarks>
+    /// The span is valid until the next write or <see cref="Reset"/>. Use <see cref="GetCompletedSpan"/> to get the
+    /// bytes for sending a message.
+    /// </remarks>
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _count);
 
     /// <summary>The number of bytes written since the writer was created or last reset.</summary>
     public int WrittenCount => _count;
 
+    /// <summary>
+    /// Returns the written bytes after checking that every value entered has been exited and that no list or batch is
+    /// still being written.
+    /// </summary>
+    /// <remarks>
+    /// Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer of <see cref="WriteBatch{T}"/>:
+    /// the message is not finished there, so it throws. It also throws after a list or batch threw, until
+    /// <see cref="Reset"/>.
+    /// </remarks>
+    /// <returns>The span of written bytes, valid until the next write or <see cref="Reset"/>.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A value entered with <see cref="EnterNested"/> has not been exited with <see cref="ExitNested"/>, or a
+    /// <see cref="WriteList{T}"/> or <see cref="WriteBatch{T}"/> call has not returned.
+    /// </exception>
+    public ReadOnlySpan<byte> GetCompletedSpan()
+    {
+        if (_sequences != 0 || _faulted)
+        {
+            throw new InvalidOperationException(
+                "A list or batch is still being written, or one threw and the writer was not reset since.");
+        }
+
+        if (_depth != 0)
+        {
+            throw new InvalidOperationException(
+                $"{_depth} nested value(s) entered with EnterNested have not been exited with ExitNested.");
+        }
+
+        return WrittenSpan;
+    }
+
     /// <summary>Empties the writer so that it can write another message.</summary>
     /// <remarks>
     /// The nesting depth returns to zero. The buffer is kept and never shrinks, so it keeps the size that the largest
     /// message written so far needed. Do not call it from an item writer of <see cref="WriteList{T}"/> or a row writer
-    /// of <see cref="WriteBatch{T}"/>: the list or batch then throws.
+    /// of <see cref="WriteBatch{T}"/>: the list or batch then throws, and <see cref="GetCompletedSpan"/> throws until
+    /// the writer is reset again outside every list and batch.
     /// </remarks>
     public void Reset()
     {
+        // A reset from an item or row writer is a fault in that writer. The list or batch then throws, and the fault
+        // must outlive this reset even if the item or row writer throws first, or calls GetCompletedSpan itself.
+        _faulted = _sequences != 0;
         _count = 0;
         _depth = 0;
         _resets++;
@@ -337,38 +384,61 @@ public sealed class OahuWriter
         ArgumentNullException.ThrowIfNull(writeItem);
 
         var span = items.AsSpan();
-        WriteCount(span.Length);
-        var itemsStart = _count;
-        var resets = _resets;
-        var depth = _depth;
-        for (var i = 0; i < span.Length; i++)
+        _sequences++;
+        var completed = false;
+        try
         {
-            writeItem(this, span[i]);
+            WriteCount(span.Length);
+            var itemsStart = _count;
+            var resets = _resets;
+            var depth = _depth;
+            for (var i = 0; i < span.Length; i++)
+            {
+                writeItem(this, span[i]);
 
-            // Both checks run after each item, so that an item that enters without exiting is reported here rather
-            // than reaching the depth limit within the list and being reported as a too-deep value. A reset followed
-            // by enough writes can leave _count above itemsStart, so the byte check alone misses it. A reset also
-            // zeroes the depth, so it is checked first.
-            if (_resets != resets)
-                throw new InvalidOperationException("An item writer reset the writer while its list was being written.");
+                // Both checks run after each item, so that an item that enters without exiting is reported here
+                // rather than reaching the depth limit within the list and being reported as a too-deep value. A reset
+                // followed by enough writes can leave _count above itemsStart, so the byte check alone misses it. A
+                // reset also zeroes the depth, so it is checked first.
+                if (_resets != resets)
+                {
+                    throw new InvalidOperationException(
+                        "An item writer reset the writer while its list was being written.");
+                }
 
-            if (_depth != depth)
+                if (_depth != depth)
+                {
+                    throw new InvalidOperationException(
+                        $"An item of the list left the nesting depth at {_depth}, not {depth} as before it. Every " +
+                        "item must call ExitNested once for each EnterNested.");
+                }
+            }
+
+            // One check per list. It guarantees that a reader's count check passes, but it does not prove that each
+            // item wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make
+            // up for it.
+            var itemBytes = _count - itemsStart;
+            if (itemBytes < span.Length)
             {
                 throw new InvalidOperationException(
-                    $"An item of the list left the nesting depth at {_depth}, not {depth} as before it. Every item " +
-                    "must call ExitNested once for each EnterNested.");
+                    $"The list's {span.Length} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
+                    "Every item must write at least one byte.");
             }
-        }
 
-        // One check per list. It guarantees that a reader's count check passes, but it does not prove that each item
-        // wrote a byte: an item that wrote nothing goes undetected when other items wrote enough bytes to make up for it.
-        var itemBytes = _count - itemsStart;
-        if (itemBytes < span.Length)
-        {
-            throw new InvalidOperationException(
-                $"The list's {span.Length} item(s) wrote only {itemBytes} byte(s), fewer than there are items. " +
-                "Every item must write at least one byte.");
+            completed = true;
         }
+        finally
+        {
+            EndSequence(completed);
+        }
+    }
+
+    // Ends a WriteList or WriteBatch call. One that did not complete, whatever threw, faults the writer until Reset.
+    private void EndSequence(bool completed)
+    {
+        _sequences--;
+        if (!completed)
+            _faulted = true;
     }
 
     /// <summary>
@@ -439,35 +509,49 @@ public sealed class OahuWriter
                 "A batch has at least one operation. An empty list is replayed as one Clear.", nameof(batch));
         }
 
-        WriteCount(count);
-        var resets = _resets;
-        var depth = _depth;
-        for (var i = 0; i < count; i++)
+        _sequences++;
+        var completed = false;
+        try
         {
-            // Each operation is read once and checked just before it is written, as WriteList writes each item: a
-            // failure leaves the operations before it written, and the writer must then be reset.
-            var operation = BatchOperation<T>.Of(batch[i], i);
-            CheckOperation(operation, i);
-            WriteVarUInt(operation.Tag);
-            if (operation.IndexCount > 0)
-                WriteCount(operation.First);
-            if (operation.IndexCount > 1)
-                WriteCount(operation.Second);
-            if (!operation.HasRow)
-                continue;
-
-            writeRow(this, operation.Row);
-
-            // As in WriteList: a reset also zeroes the depth, so it is checked first.
-            if (_resets != resets)
-                throw new InvalidOperationException("A row writer reset the writer while its batch was being written.");
-
-            if (_depth != depth)
+            WriteCount(count);
+            var resets = _resets;
+            var depth = _depth;
+            for (var i = 0; i < count; i++)
             {
-                throw new InvalidOperationException(
-                    $"A row of the batch left the nesting depth at {_depth}, not {depth} as before it. Every row " +
-                    "must call ExitNested once for each EnterNested.");
+                // Each operation is read once and checked just before it is written, as WriteList writes each item: a
+                // failure leaves the operations before it written, and the writer must then be reset.
+                var operation = BatchOperation<T>.Of(batch[i], i);
+                CheckOperation(operation, i);
+                WriteVarUInt(operation.Tag);
+                if (operation.IndexCount > 0)
+                    WriteCount(operation.First);
+                if (operation.IndexCount > 1)
+                    WriteCount(operation.Second);
+                if (!operation.HasRow)
+                    continue;
+
+                writeRow(this, operation.Row);
+
+                // As in WriteList: a reset also zeroes the depth, so it is checked first.
+                if (_resets != resets)
+                {
+                    throw new InvalidOperationException(
+                        "A row writer reset the writer while its batch was being written.");
+                }
+
+                if (_depth != depth)
+                {
+                    throw new InvalidOperationException(
+                        $"A row of the batch left the nesting depth at {_depth}, not {depth} as before it. Every row " +
+                        "must call ExitNested once for each EnterNested.");
+                }
             }
+
+            completed = true;
+        }
+        finally
+        {
+            EndSequence(completed);
         }
     }
 
