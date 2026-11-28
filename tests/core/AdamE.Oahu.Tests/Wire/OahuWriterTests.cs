@@ -13,6 +13,10 @@ public sealed class OahuWriterTests
         { "ExitNested at depth 0", static w => w.ExitNested() },
         { "WriteList(null writer)", static w => w.WriteList<int>([1], null!) },
         { "WriteBatch(empty)", static w => w.WriteBatch<BatchTests.TaskRow>([], static (_, _) => { }) },
+        {
+            "WriteBatch(Count throws)",
+            static w => w.WriteBatch(new CountThrowingBatch<BatchTests.TaskRow>(), static (_, _) => { })
+        },
         { "WriteMessage(null codec)", static w => w.WriteMessage<int>(1, null!) },
     };
 
@@ -237,5 +241,18 @@ public sealed class OahuWriterTests
             Assert.Equal((ulong)i << 40, reader.ReadVarUInt());
             reader.EnsureEnd();
         }
+    }
+
+    // A caller's batch whose Count throws, as a list backed by a disposed or remote source can.
+    private sealed class CountThrowingBatch<T> : IReadOnlyList<ListOp<T>>
+        where T : IOahuKeyed
+    {
+        public int Count => throw new InvalidOperationException("The batch is no longer available.");
+
+        public ListOp<T> this[int index] => throw new InvalidOperationException("The batch is no longer available.");
+
+        public IEnumerator<ListOp<T>> GetEnumerator() => throw new InvalidOperationException("The batch is no longer available.");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

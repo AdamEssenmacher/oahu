@@ -583,7 +583,18 @@ public sealed class OahuWriter
             ArgumentNullException.ThrowIfNull(writeRow);
         }
 
-        var count = batch.Count;
+        // The caller's list can throw from Count, before the sequence below starts and faults on its own.
+        int count;
+        try
+        {
+            count = batch.Count;
+        }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+
         if (count == 0)
         {
             _faulted = true;
@@ -741,6 +752,15 @@ public sealed class OahuWriter
         }
 
         var doubled = Math.Min((long)_buffer.Length * 2, Array.MaxLength);
-        Array.Resize(ref _buffer, (int)Math.Max(doubled, required));
+        try
+        {
+            Array.Resize(ref _buffer, (int)Math.Max(doubled, required));
+        }
+        catch
+        {
+            // An OutOfMemoryException leaves the bytes as they were, but the write that needed the room did not happen.
+            _faulted = true;
+            throw;
+        }
     }
 }
